@@ -1612,6 +1612,8 @@ class ConfigVmInterface():
             self.vnc.virtual_machine_interface_update(obj)
 
     def sg_del(self, obj, sg):
+        obj.set_security_group_list([])
+        '''
         try:
             sg_obj = self.vnc.security_group_read(
                     fq_name = ['default-domain', self.tenant.name, sg])
@@ -1619,6 +1621,7 @@ class ConfigVmInterface():
             print 'ERROR: %s' %(str(e))
             return
         obj.del_security_group(sg_obj)
+        '''
 
     def irt_del(self, obj, irt):
         try:
