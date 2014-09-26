@@ -1,7 +1,7 @@
 #!/usr/bin/python
 
 import sys
-from config_shell import *
+from opencontrail_config.config_shell import *
 
 default_client_args = [
     ('--username', 'admin'),
