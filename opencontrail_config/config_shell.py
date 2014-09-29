@@ -268,6 +268,23 @@ class ConfigShell():
         sub_parser.add_argument('--auto-policy', action = 'store_true',
                 help = 'Enable automatic policy')
 
+        sub_parser = subparsers.add_parser('bgp-peer',
+                help = 'BGP Peer')
+        sub_parser.set_defaults(obj_class = ConfigBgpRouter,
+                obj_parser = sub_parser)
+        sub_parser.add_argument('name', nargs = '?', default = None,
+                metavar = '<name>', help = 'The name of BGP peer')
+        sub_parser.add_argument('--vendor', metavar = '<name>',
+                help = 'The name of vendor')
+        sub_parser.add_argument('--asn', metavar = '<number>',
+                help = 'The number autonomous system')
+        sub_parser.add_argument('--address', metavar = '<address>',
+                help = 'The IP address of BGP peer')
+        sub_parser.add_argument('--identifier', metavar = '<identifier>',
+                help = 'The identifier of BGP peer')
+        sub_parser.add_argument('--control', action = 'store_true',
+                help = 'BGP peer is control node')
+
         sub_parser = subparsers.add_parser('link-local',
                 help = 'Link Local Service')
         sub_parser.set_defaults(obj_class = ConfigGlobalVrouter,
@@ -328,6 +345,9 @@ class ConfigShell():
                 obj.add(args.name, args.security_group,
                         args.interface_route_table, args.address,
                         args.floating_ip_pool, args.floating_ip)
+            elif (args.obj_class == ConfigBgpRouter):
+                obj.add(args.name, args.vendor, args.asn, args.address,
+                        args.identifier, args.control)
             elif (args.obj_class == ConfigGlobalVrouter):
                 obj.add(args.name, args.link_local_address,
                         args.fabric_address)
@@ -359,6 +379,8 @@ class ConfigShell():
                 obj.delete(args.name, args.security_group,
                            args.interface_route_table, args.address,
                            args.floating_ip)
+            elif (args.obj_class == ConfigBgpRouter):
+                obj.delete(args.name)
             elif (args.obj_class == ConfigGlobalVrouter):
                 obj.delete(args.name)
         else:
