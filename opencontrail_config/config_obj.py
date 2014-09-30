@@ -1770,21 +1770,6 @@ class ConfigBgpRouter():
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
             return
-
-        peer_list = self.vnc.bgp_routers_list()['bgp-routers']
-        peer_id_list = []
-        for peer in peer_list:
-            peer_id_list.append(peer['uuid'])
-
-        peer_obj_list = []
-        for item in peer_id_list:
-            peer_obj_list.append(self.vnc.bgp_router_read(id = item))
-
-        for item in peer_obj_list:
-            if item.uuid == obj.uuid:
-                continue
-            item.del_bgp_router(obj)
-            self.vnc.bgp_router_update(item)
         self.vnc.bgp_router_delete(id = obj.uuid)
 
 
