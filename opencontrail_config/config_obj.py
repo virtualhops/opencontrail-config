@@ -1450,7 +1450,11 @@ class ConfigVmInterface():
                         'obj':if_obj})
         else:
             for vm_nova in self.nova.servers.list():
-                vm = self.vnc.virtual_machine_read(id = vm_nova.id)
+                try:
+                    vm = self.vnc.virtual_machine_read(id = vm_nova.id)
+                except:
+                    print 'WARN: VM %s is not found.' %(vm_nova.id)
+                    continue
                 if_ref_list = vm.get_virtual_machine_interface_back_refs()
                 for if_ref in if_ref_list:
                     if_obj = self.vnc.virtual_machine_interface_read(
