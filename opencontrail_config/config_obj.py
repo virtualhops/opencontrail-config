@@ -683,8 +683,18 @@ class ConfigNetwork():
                 ip_prefix_len = int(cidr[1]))
         ipam_subnet = vnc_api.IpamSubnetType(subnet = subnet,
                 default_gateway = gateway)
+
+        ipam_list = obj.get_network_ipam_refs()
+        subnet_list = []
+        if ipam_list:
+            for item in ipam_list:
+                if item['to'] == ipam_obj.get_fq_name():
+                    subnet_list = item['attr'].get_ipam_subnets()
+                    obj.del_network_ipam(ref_obj = ipam_obj)   
+                    break
+        subnet_list.append(ipam_subnet)
         obj.add_network_ipam(ref_obj = ipam_obj,    
-                ref_data = vnc_api.VnSubnetsType([ipam_subnet]))
+                ref_data = vnc_api.VnSubnetsType(subnet_list))
 
     def ipam_del(self, obj, name):
         try:
