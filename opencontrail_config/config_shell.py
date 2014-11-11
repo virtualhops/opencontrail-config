@@ -174,6 +174,10 @@ class ConfigShell():
                 metavar = '<name>', help = 'The name of interface route table')
         sub_parser.add_argument('--route', action = 'append',
                 metavar = '<prefix>/<length>', help = 'Route')
+        sub_parser.add_argument('--address-family',
+                choices = ['ipv4', 'ipv6'],
+                metavar = '<address family>',
+                help = 'Address family [ ipv4 | ipv6 ]')
 
         sub_parser = subparsers.add_parser('route-table',
                 help = 'Network Route Table')
@@ -340,7 +344,7 @@ class ConfigShell():
             elif (args.obj_class == ConfigRouteTable):
                 obj.add(args.name, args.route)
             elif (args.obj_class == ConfigInterfaceRouteTable):
-                obj.add(args.name, args.route)
+                obj.add(args.name, args.route, args.address_family)
             elif (args.obj_class == ConfigVmInterface):
                 obj.add(args.name, args.security_group,
                         args.interface_route_table, args.address,

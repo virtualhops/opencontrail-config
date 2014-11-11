@@ -1374,6 +1374,11 @@ class ConfigInterfaceRouteTable():
         print 'Interface Route Table'
         print 'Name: %s' %(obj.get_fq_name())      
         print 'UUID: %s' %(obj.uuid)
+        try:
+            af = obj.get_interface_route_table_family()
+            print 'Address Family: %s' %(af)
+        except:
+            pass
         routes = obj.get_interface_route_table_routes()
         if not routes:
             return
@@ -1408,16 +1413,18 @@ class ConfigInterfaceRouteTable():
                 routes.delete_route(item)
         obj.set_interface_route_table_routes(routes)
 
-    def add(self, name, route = None):
+    def add(self, name, route_list = None, af = None):
         create = False
         obj = self.obj_get(name)
         if not obj:
             obj = vnc_api.InterfaceRouteTable(name = name,
                     parent_obj = self.tenant)
             create = True
-        if route:
-            for item in route:
+        if route_list:
+            for item in route_list:
                 self.route_add(obj, item)
+        if af:
+            obj.set_interface_route_table_family(af)
         if create:
             try:
                 self.vnc.interface_route_table_create(obj)
