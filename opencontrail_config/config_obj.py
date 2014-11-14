@@ -1424,7 +1424,10 @@ class ConfigInterfaceRouteTable():
             for item in route_list:
                 self.route_add(obj, item)
         if af:
-            obj.set_interface_route_table_family(af)
+            if af == 'ipv4':
+                obj.set_interface_route_table_family('v4')
+            elif af == 'ipv6':
+                obj.set_interface_route_table_family('v6')
         if create:
             try:
                 self.vnc.interface_route_table_create(obj)
