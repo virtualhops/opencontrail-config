@@ -34,6 +34,12 @@ class ConfigShell():
         subparsers = parser.add_subparsers(metavar = '<object>')
         self.sub_cmd_dict = {}
 
+        sub_parser = subparsers.add_parser('tenant', help = 'Tenant')
+        sub_parser.set_defaults(obj_class = ConfigTenant,
+                obj_parser = sub_parser)
+        sub_parser.add_argument('name', nargs = '?', default = None,
+                metavar = '<name>', help = 'The name of virtual DNS')
+
         sub_parser = subparsers.add_parser('vdns', help = 'Virtual DNS')
         sub_parser.set_defaults(obj_class = ConfigVirtualDns,
                 obj_parser = sub_parser)
@@ -316,7 +322,9 @@ class ConfigShell():
         elif args.cmd == 'show':
             obj.show(args.name)
         elif args.cmd == 'add':
-            if (args.obj_class == ConfigVirtualDns):
+            if (args.obj_class == ConfigTenant):
+                obj.add(args.name)
+            elif (args.obj_class == ConfigVirtualDns):
                 obj.add(args.name, args.record_order, args.next_dns)
             elif (args.obj_class == ConfigIpam):
                 obj.add(args.name, args.dns_type, args.virtual_dns,
@@ -356,7 +364,9 @@ class ConfigShell():
                 obj.add(args.name, args.link_local_address,
                         args.fabric_address)
         elif args.cmd == 'delete':
-            if (args.obj_class == ConfigVirtualDns):
+            if (args.obj_class == ConfigTenant):
+                obj.delete(args.name)
+            elif (args.obj_class == ConfigVirtualDns):
                 obj.delete(args.name)
             elif (args.obj_class == ConfigIpam):
                 obj.delete(args.name, args.domain_name)
