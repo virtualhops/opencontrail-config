@@ -11,6 +11,52 @@ except:
     config_nova = False
 
 
+class ConfigTenant():
+    def __init__(self, client):
+        self.vnc = client.vnc
+        self.tenant = client.tenant
+
+    def obj_list(self):
+        list = self.vnc.projects_list()['projects']
+        return list
+
+    def obj_get(self, name):
+        for item in self.obj_list():
+            if (item['fq_name'][1] == name):
+                return self.vnc.project_read(id = item['uuid'])
+
+    def obj_show(self, obj):
+        print 'Tenant(Project)'
+        print 'Name: %s' %(obj.get_fq_name())      
+        print 'UUID: %s' %(obj.uuid)
+
+    def show(self, name = None):
+        if name:
+            obj = self.obj_get(name)
+            if not obj:
+                print 'ERROR: Object %s is not found!' %(name)
+                return
+            self.obj_show(obj)
+        else:
+            for item in self.obj_list():
+                print '    %s' %(item['fq_name'][1])
+
+    def add(self, name):
+        domain = self.vnc.domain_read(fq_name = ['default-domain'])
+        obj = vnc_api.Project(name = name, parent_obj = domain)
+        try:
+            self.vnc.project_create(obj)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+
+    def delete(self, name):
+        try:
+            self.vnc.project_delete(
+                    fq_name = ['default-domain', name])
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+
+
 class ConfigVirtualDns():
     def __init__(self, client):
         self.vnc = client.vnc
@@ -1856,6 +1902,9 @@ class ConfigClient():
                     auth_url = 'http://%s:35357/v2.0' %(api_server))
         else:
             self.nova = None
-        self.tenant = self.vnc.project_read(
-                fq_name = ['default-domain', tenant])
+        try:
+            self.tenant = self.vnc.project_read(
+                    fq_name = ['default-domain', tenant]) 
+        except:
+            self.tenant = None
 
