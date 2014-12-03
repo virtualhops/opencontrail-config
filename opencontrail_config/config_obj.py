@@ -1892,14 +1892,15 @@ class ConfigGlobalVrouter():
         self.vnc.global_vrouter_config_update(obj)
 
 class ConfigClient():
-    def __init__(self, username, password, tenant, region, api_server):
+    def __init__(self, username, password, tenant, api_server,
+            region, auth_server):
         self.vnc = vnc_api.VncApi(username = username, password = password,
                 tenant_name = tenant, api_server_host = api_server)
         if config_nova:
             self.nova = novaclient.v1_1.client.Client(username = username,
                     api_key = password, project_id = tenant,
                     region_name = region,
-                    auth_url = 'http://%s:35357/v2.0' %(api_server))
+                    auth_url = 'http://%s:35357/v2.0' %(auth_server))
         else:
             self.nova = None
         try:

@@ -4,10 +4,11 @@ import sys
 from opencontrail_config.config_shell import *
 
 default_client_args = [
-    ('--username', 'admin'),
-    ('--password', 'contrail123'),
-    ('--region', 'RegionOne'),
-    ('--tenant', 'demo'),
+    ('--auth-username', 'admin'),
+    ('--auth-password', 'contrail123'),
+    ('--auth-tenant', 'admin'),
+    ('--auth-region', 'RegionOne'),
+    ('--auth-server', '127.0.0.1'),
     ('--api-server', '127.0.0.1')]
 
 if __name__ == '__main__':

@@ -22,10 +22,11 @@ class ConfigShell():
 
     def parser_init(self):
         parser = argparse.ArgumentParser()
-        parser.add_argument('--username', help = 'User name')
-        parser.add_argument('--password', help = 'Password')
-        parser.add_argument('--tenant', help = 'Tenant name')
-        parser.add_argument('--region', help = 'Region name')
+        parser.add_argument('--auth-username', help = 'User name')
+        parser.add_argument('--auth-password', help = 'Password')
+        parser.add_argument('--auth-tenant', help = 'Tenant name')
+        parser.add_argument('--auth-region', help = 'Region name')
+        parser.add_argument('--auth-server', help = 'Auth server address')
         parser.add_argument('--api-server', help = 'API server address')
 
         parser.add_argument('cmd', choices = ['add', 'show', 'delete', 'help'],
@@ -405,8 +406,9 @@ class ConfigShell():
         args = self.parse()
         #print args
         #return
-        client = ConfigClient(args.username, args.password, args.tenant,
-                args.region, args.api_server)
+        client = ConfigClient(args.auth_username, args.auth_password,
+                args.auth_tenant, args.api_server, args.auth_region,
+                args.auth_server)
         self.run(args, client)
 
 
