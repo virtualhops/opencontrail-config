@@ -184,7 +184,8 @@ class ConfigVirtualDns():
         print 'Default TTL: %s seconds' %(dns.default_ttl_seconds)
         print 'Next DNS: %s' %(dns.next_virtual_DNS)
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -262,7 +263,8 @@ class ConfigIpam():
         self.dns_show(mgmt)
         self.dhcp_show(mgmt)
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -423,7 +425,8 @@ class ConfigPolicy():
             for item in list:
                 print '    %s' %(item['to'][2])
 
-    def show(self, name):
+    def show(self, args):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -623,7 +626,8 @@ class ConfigSecurityGroup():
         print 'UUID: %s' %(obj.uuid)
         self.rule_show(obj)
 
-    def show(self, name):
+    def show(self, args):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -808,7 +812,8 @@ class ConfigNetwork():
         self.ref_policy_show(obj)
         self.ref_route_table_show(obj)
 
-    def show(self, name):
+    def show(self, args):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1018,7 +1023,8 @@ class ConfigFloatingIpPool():
         self.child_ip_show(obj)
         self.back_ref_tenant_show(obj)
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1104,7 +1110,8 @@ class ConfigServiceTemplate():
         for item in properties.get_interface_type():
             print '    %s' %(item.get_service_interface_type())
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1178,7 +1185,8 @@ class ConfigServiceInstance():
         print 'Name: %s' %(obj.get_fq_name())      
         print 'UUID: %s' %(obj.uuid)
 
-    def show(self, name):
+    def show(self, args):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1272,7 +1280,8 @@ class ConfigImage():
         print 'Name: %s' %(obj.name)      
         print 'UUID: %s' %(obj.id)
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1307,7 +1316,8 @@ class ConfigFlavor():
         print 'Name: %s' %(obj.name)      
         print 'UUID: %s' %(obj.id)
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1348,7 +1358,8 @@ class ConfigVirtualMachine():
         for item in obj.addresses.keys():
             print '    %s  %s' %(obj.addresses[item][0]['addr'], item)
 
-    def show(self, name):
+    def show(self, args):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1443,7 +1454,8 @@ class ConfigRouteTable():
         for item in routes.get_route():
             print '  %s next-hop %s' %(item.get_prefix(), item.get_next_hop())
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1534,7 +1546,8 @@ class ConfigInterfaceRouteTable():
         for item in routes.get_route():
             print '  %s' %(item.get_prefix())
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1704,7 +1717,8 @@ class ConfigVmInterface():
         self.back_ref_ip_show(obj)
         self.back_ref_fip_show(obj)
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1883,7 +1897,8 @@ class ConfigBgpRouter():
         self.prop_show(obj)
         self.ref_bgp_router_show(obj)
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1964,7 +1979,8 @@ class ConfigGlobalVrouter():
     def obj_show(self, obj):
         pass
 
-    def show(self, name = None):
+    def show(self, args = None):
+        name = args.name
         obj = self.obj_get('dummy')
         print 'Link Local Service'
         for item in obj.get_linklocal_services().get_linklocal_service_entry():
