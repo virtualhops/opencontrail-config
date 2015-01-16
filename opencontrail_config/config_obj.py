@@ -11,35 +11,138 @@ except:
     config_nova = False
 
 
-class ConfigTenant():
-    def __init__(self, client):
+class ConfigObj(object):
+    def __init__(self, client, obj_read_func):
         self.vnc = client.vnc
         self.tenant = client.tenant
+        self.obj_read_func = obj_read_func
 
-    def obj_list(self):
-        list = self.vnc.projects_list()['projects']
-        return list
+    def obj_get(self, fq_name):
+        try:
+            obj = self.obj_read_func(fq_name = fq_name)
+            return obj
+        except:
+            pass
 
-    def obj_get(self, name):
-        for item in self.obj_list():
-            if (item['fq_name'][1] == name):
-                return self.vnc.project_read(id = item['uuid'])
+    def show_json(self, obj):
+        import json
+        print json.dumps(obj, default = self.vnc._obj_serializer_all,
+                indent=4, separators=(',', ': '))
 
-    def obj_show(self, obj):
-        print 'Tenant(Project)'
-        print 'Name: %s' %(obj.get_fq_name())      
-        print 'UUID: %s' %(obj.uuid)
+    def show_dict(self, obj):
+        import pprint
+        pp = pprint.PrettyPrinter(indent = 1, width = 80)
+        pp.pprint(self.vnc.obj_to_dict(obj))
 
-    def show(self, name = None):
-        if name:
-            obj = self.obj_get(name)
+    def show(self, args = None):
+        if args.name:
+            fq_name = self.fq_name_get(args)
+            obj = self.obj_get(fq_name)
             if not obj:
-                print 'ERROR: Object %s is not found!' %(name)
+                print 'ERROR: Object %s is not found!' %(fq_name)
                 return
-            self.obj_show(obj)
+            if (args.format == 'json'):
+                self.show_json(obj)
+            elif (args.format == 'dict'):
+                self.show_dict(obj)
+            else:
+                self.show_obj(self.vnc.obj_to_dict(obj))      
         else:
-            for item in self.obj_list():
-                print '    %s' %(item['fq_name'][1])
+            self.show_list()
+
+
+class ConfigPort(ConfigObj):
+    def __init__(self, client):
+        super(ConfigPort, self).__init__(client,
+                client.vnc.virtual_machine_interface_read)
+
+    def fq_name_get(self, args):
+        fq_name = ['default-domain', self.tenant.name, args.name]
+        return fq_name
+
+    def show_obj(self, dict):
+        print 'Port (Virtual Machine Interface)'
+        print 'Name: %s' %(dict['fq_name'])      
+        print 'UUID: %s' %(dict['uuid'])
+
+    def show_list(self):
+        list = self.vnc.virtual_machine_interfaces_list()[
+                'virtual-machine-interfaces']
+        for item in list:
+            print '    %s' %(item['fq_name'][2])
+
+    def add(self, name, network, address, shared):
+        if name:
+            id = None
+        else:
+            id = str(uuid.uuid4())
+            name = id
+        port_obj = vnc_api.VirtualMachineInterface(name = name, uuid = id,
+                parent_obj = self.tenant)
+        net_obj = self.vnc.virtual_network_read(
+                fq_name = ['default-domain', self.tenant.name, network])
+        port_obj.set_virtual_network(net_obj)
+        self.vnc.virtual_machine_interface_create(port_obj)
+
+        id = str(uuid.uuid4())
+        ip_obj = vnc_api.InstanceIp(name = id, uuid = id) 
+        ip_obj.add_virtual_network(net_obj)
+        if address:
+            ip_obj.set_instance_ip_address(address)
+        if shared:
+            ip_obj.set_instance_ip_mode(u'active-active')
+        ip_obj.add_virtual_machine_interface(port_obj)
+        self.vnc.instance_ip_create(ip_obj)
+        print port_obj.uuid
+
+    def delete(self, name):
+        fq_name = ['default-domain', self.tenant.name, name]
+        obj = self.obj_get(fq_name)
+        if not obj:
+            print 'ERROR: Object %s is not found!' %(fq_name)
+        for item in obj.get_instance_ip_back_refs():
+            self.vnc.instance_ip_delete(id = item['uuid'])
+        self.vnc.virtual_machine_interface_delete(id = obj.uuid)
+
+
+class ConfigInstanceIp(ConfigObj):
+    def __init__(self, client):
+        super(ConfigInstanceIp, self).__init__(client,
+                client.vnc.instance_ip_read)
+
+    def fq_name_get(self, args):
+        fq_name = [args.name]
+        return fq_name
+
+    def show_obj(self, dict):
+        print 'Instance IP'
+        print 'Name: %s' %(dict['fq_name'])      
+        print 'UUID: %s' %(dict['uuid'])
+
+    def show_list(self):
+        list = self.vnc.instance_ips_list()['instance-ips']
+        for item in list:
+            print '    %s' %(item['fq_name'][0])
+
+
+class ConfigTenant(ConfigObj):
+    def __init__(self, client):
+        super(ConfigTenant, self).__init__(client,
+                client.vnc.project_read)
+
+    def fq_name_get(self, args):
+        fq_name = ['default-domain', args.name]
+        return fq_name
+
+    def show_obj(self, dict):
+        print 'Tenant(Project)'
+        print 'Name: %s' %(dict['fq_name'])      
+        print 'UUID: %s' %(dict['uuid'])
+
+    def show_list(self):
+        list = self.vnc.projects_list()['projects']
+        for item in list:
+            print '    %s' %(item['fq_name'][1])
 
     def add(self, name):
         domain = self.vnc.domain_read(fq_name = ['default-domain'])
