@@ -1328,31 +1328,42 @@ class ConfigRouteTable(ConfigObj):
         for item in routes.get_route():
             print '  %s next-hop %s' %(item.get_prefix(), item.get_next_hop())
 
-    def route_add(self, obj, route):
+    def route_add(self, obj, route_args):
         routes = obj.get_routes()
         if not routes:
             routes = vnc_api.RouteTableType()
             obj.set_routes(routes)
-        prefix = route.split(':')[0]
-        nh = 'default-domain:%s:%s' %(self.tenant.name, route.split(':')[1])
+        for arg in route_args.split(','):
+            arg_name = arg.split('=')[0]
+            arg_val = arg.split('=')[1]
+            if (arg_name == 'prefix'):
+                prefix = arg_val
+            elif (arg_name == 'next-hop'):
+                nh = 'default-domain:%s:%s' %(self.tenant.name, arg_val)
         routes.add_route(vnc_api.RouteType(prefix = prefix, next_hop = nh))
 
-    def route_del(self, obj, prefix):
+    def route_del(self, obj, route_args):
         routes = obj.get_routes()
         if not routes:
             return
+        for arg in route_args.split(','):
+            arg_name = arg.split('=')[0]
+            arg_val = arg.split('=')[1]
+            if (arg_name == 'prefix'):
+                prefix = arg_val
         for item in routes.get_route():
             if (item.get_prefix() == prefix):
                 routes.delete_route(item)
+        routes = obj.set_routes(routes)
 
-    def add(self, name, route = None):
+    def add(self, name, route_list = None):
         create = False
         obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             obj = vnc_api.RouteTable(name = name, parent_obj = self.tenant)
             create = True
-        if route:
-            for item in route:
+        if route_list:
+            for item in route_list:
                 self.route_add(obj, item)
         if create:
             try:
@@ -1362,12 +1373,12 @@ class ConfigRouteTable(ConfigObj):
         else:
             self.vnc.route_table_update(obj)
 
-    def delete(self, name, route = None):
+    def delete(self, name, route_list = None):
         obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
-        if route:
-            for item in route:
+        if route_list:
+            for item in route_list:
                 self.route_del(obj, item)
             self.vnc.route_table_update(obj)
         else:

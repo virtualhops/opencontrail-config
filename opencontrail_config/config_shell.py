@@ -192,8 +192,9 @@ class ConfigShell():
                 obj_parser = sub_parser)
         self.add_common_args(sub_parser)
         sub_parser.add_argument('--route', action = 'append',
-                metavar = '<prefix>/<length>:<next-hop>',
-                help = 'The route and next-hop')
+                metavar = '<arguments>',
+                help = 'prefix=<prefix>/<length>,' \
+                       'next-hop=<service instance>')
 
         sub_parser = subparsers.add_parser('vm-interface',
                 help = 'Virtual Machine Interface')
