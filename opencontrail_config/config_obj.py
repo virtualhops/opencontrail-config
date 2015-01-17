@@ -46,7 +46,7 @@ class ConfigObj(object):
             elif (args.format == 'dict'):
                 self.show_dict(obj)
             else:
-                self.show_obj(self.vnc.obj_to_dict(obj))      
+                self.show_obj(self.vnc.obj_to_dict(obj), obj)      
         else:
             self.show_list()
 
@@ -60,32 +60,36 @@ class ConfigPort(ConfigObj):
         fq_name = ['default-domain', self.tenant.name, args.name]
         return fq_name
 
-    def show_obj(self, dict):
-        print 'Port (Virtual Machine Interface)'
-        print 'Name: %s' %(dict['fq_name'])      
-        print 'UUID: %s' %(dict['uuid'])
-
     def show_list(self):
         list = self.vnc.virtual_machine_interfaces_list()[
                 'virtual-machine-interfaces']
         for item in list:
-            print '    %s' %(item['fq_name'][2])
+            if (item['fq_name'][1] == self.tenant.name):
+                print '%s' %(item['fq_name'][2])
+
+    def show_obj(self, dict, obj):
+        print 'Port'
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
 
     def add(self, name, network, address, shared):
         if name:
-            id = None
+            port_obj = vnc_api.VirtualMachineInterface(name = name, 
+                    parent_obj = self.tenant)
         else:
             id = str(uuid.uuid4())
-            name = id
-        port_obj = vnc_api.VirtualMachineInterface(name = name, uuid = id,
-                parent_obj = self.tenant)
+            port_obj = vnc_api.VirtualMachineInterface(name = id, 
+                    parent_obj = self.tenant)
+            port_obj.uuid = id
+
         net_obj = self.vnc.virtual_network_read(
                 fq_name = ['default-domain', self.tenant.name, network])
         port_obj.set_virtual_network(net_obj)
         self.vnc.virtual_machine_interface_create(port_obj)
 
         id = str(uuid.uuid4())
-        ip_obj = vnc_api.InstanceIp(name = id, uuid = id) 
+        ip_obj = vnc_api.InstanceIp(name = id) 
+        ip_obj.uuid = id
         ip_obj.add_virtual_network(net_obj)
         if address:
             ip_obj.set_instance_ip_address(address)
@@ -96,10 +100,9 @@ class ConfigPort(ConfigObj):
         print port_obj.uuid
 
     def delete(self, name):
-        fq_name = ['default-domain', self.tenant.name, name]
-        obj = self.obj_get(fq_name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
-            print 'ERROR: Object %s is not found!' %(fq_name)
+            print 'ERROR: Object %s is not found!' %(name)
         for item in obj.get_instance_ip_back_refs():
             self.vnc.instance_ip_delete(id = item['uuid'])
         self.vnc.virtual_machine_interface_delete(id = obj.uuid)
@@ -114,15 +117,15 @@ class ConfigInstanceIp(ConfigObj):
         fq_name = [args.name]
         return fq_name
 
-    def show_obj(self, dict):
-        print 'Instance IP'
-        print 'Name: %s' %(dict['fq_name'])      
-        print 'UUID: %s' %(dict['uuid'])
-
     def show_list(self):
         list = self.vnc.instance_ips_list()['instance-ips']
         for item in list:
-            print '    %s' %(item['fq_name'][0])
+            print '%s' %(item['fq_name'][0])
+
+    def show_obj(self, dict, obj):
+        print 'Instance IP'
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
 
 
 class ConfigTenant(ConfigObj):
@@ -134,15 +137,15 @@ class ConfigTenant(ConfigObj):
         fq_name = ['default-domain', args.name]
         return fq_name
 
-    def show_obj(self, dict):
-        print 'Tenant(Project)'
-        print 'Name: %s' %(dict['fq_name'])      
-        print 'UUID: %s' %(dict['uuid'])
-
     def show_list(self):
         list = self.vnc.projects_list()['projects']
         for item in list:
-            print '    %s' %(item['fq_name'][1])
+            print '%s' %(item['fq_name'][1])
+
+    def show_obj(self, dict, obj):
+        print 'Tenant(Project)'
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
 
     def add(self, name):
         domain = self.vnc.domain_read(fq_name = ['default-domain'])
@@ -176,7 +179,7 @@ class ConfigVirtualDns():
 
     def obj_show(self, obj):
         print 'Virtual DNS'
-        print 'Name: %s' %(obj.get_fq_name())      
+        print 'Name: %s' %(obj.get_fq_name())
         print 'UUID: %s' %(obj.uuid)
         dns = obj.get_virtual_DNS_data()
         print 'Domain name: %s' %(dns.domain_name)
@@ -184,8 +187,7 @@ class ConfigVirtualDns():
         print 'Default TTL: %s seconds' %(dns.default_ttl_seconds)
         print 'Next DNS: %s' %(dns.next_virtual_DNS)
 
-    def show(self, args = None):
-        name = args.name
+    def show(self, name = None):
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -216,65 +218,25 @@ class ConfigVirtualDns():
             print 'ERROR: %s' %(str(e))
 
 
-class ConfigIpam():
+class ConfigIpam(ConfigObj):
     def __init__(self, client):
-        self.vnc = client.vnc
-        self.tenant = client.tenant
+        super(ConfigIpam, self).__init__(client,
+                client.vnc.network_ipam_read)
 
-    def obj_list(self):
+    def fq_name_get(self, args):
+        fq_name = ['default-domain', self.tenant.name, args.name]
+        return fq_name
+
+    def show_list(self):
         list = self.vnc.network_ipams_list()['network-ipams']
-        return list
+        for item in list:
+            if (item['fq_name'][1] == self.tenant.name):
+                print '%s' %(item['fq_name'][2])
 
-    def obj_get(self, name):
-        for item in self.obj_list():
-            if (item['fq_name'][1] == self.tenant.name) and \
-                    (item['fq_name'][2] == name):
-                return self.vnc.network_ipam_read(id = item['uuid'])
-
-    def dns_show(self, mgmt):
-        print '    DNS Type: %s' %(mgmt.ipam_dns_method)
-        if (mgmt.ipam_dns_method == 'virtual-dns-server'):
-            print '        Virtual DNS Server: %s' %(
-                    mgmt.get_ipam_dns_server().virtual_dns_server_name)
-        elif (mgmt.ipam_dns_method == 'tenant-dns-server'):
-            list = mgmt.get_ipam_dns_server().get_tenant_dns_server_address().get_ip_address()
-            print '        Tenant DNS Server:'
-            for item in list:
-                print '            %s' %(item)
-
-    def dhcp_show(self, mgmt):
-        dhcp_opt = {'4':'NTP Server', '15':'Domain Name'}
-        print '    DHCP Options:'
-        dhcp = mgmt.get_dhcp_option_list()
-        if not dhcp:
-            return
-        for item in dhcp.get_dhcp_option():
-            print '        %s: %s' %(dhcp_opt[item.dhcp_option_name],
-                    item.dhcp_option_value)
-
-    def obj_show(self, obj):
-        print 'IPAM'
-        print 'Name: %s' %(obj.get_fq_name())      
-        print 'UUID: %s' %(obj.uuid)
-        print 'Management:'
-        mgmt = obj.get_network_ipam_mgmt()
-        if not mgmt:
-            return
-        self.dns_show(mgmt)
-        self.dhcp_show(mgmt)
-
-    def show(self, args = None):
-        name = args.name
-        if name:
-            obj = self.obj_get(name)
-            if not obj:
-                print 'ERROR: Object %s is not found!' %(name)
-                return
-            self.obj_show(obj)
-        else:
-            for item in self.obj_list():
-                if (item['fq_name'][1] == self.tenant.name):
-                    print '    %s' %(item['fq_name'][2])
+    def show_obj(self, dict, obj):
+        print 'Network IPAM'
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
 
     def dns_add(self, mgmt, dns_type, virtual_dns = None, tenant_dns = None):
         type = {'none':'none',
@@ -313,10 +275,9 @@ class ConfigIpam():
     def add(self, name, dns_type, virtual_dns = None, tenant_dns = None,
             domain_name = None, ntp_server = None):
         create = False
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
-            obj = vnc_api.NetworkIpam(name = name,
-                    parent_obj = self.tenant)
+            obj = vnc_api.NetworkIpam(name = name, parent_obj = self.tenant)
             create = True
         mgmt = obj.get_network_ipam_mgmt()
         if not mgmt:
@@ -334,7 +295,7 @@ class ConfigIpam():
 
     def delete(self, name, domain_name = None):
         update = False
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
             return
@@ -358,85 +319,66 @@ class ConfigIpam():
                 print 'ERROR: %s' %(str(e))
 
 
-class ConfigPolicy():
+class ConfigPolicy(ConfigObj):
     def __init__(self, client):
-        self.vnc = client.vnc
-        self.tenant = client.tenant
+        super(ConfigPolicy, self).__init__(client,
+                client.vnc.network_policy_read)
 
-    def obj_list(self):
+    def fq_name_get(self, args):
+        fq_name = ['default-domain', self.tenant.name, args.name]
+        return fq_name
+
+    def show_list(self):
         list = self.vnc.network_policys_list()['network-policys']
-        return list
+        for item in list:
+            if (item['fq_name'][1] == self.tenant.name):
+                print '%s' %(item['fq_name'][2])
 
-    def obj_get(self, name):
-        for item in self.obj_list():
-            if (item['fq_name'][1] == self.tenant.name) and \
-                    (item['fq_name'][2] == name):
-                return self.vnc.network_policy_read(id = item['uuid'])
-
-    def addr_show(self, addr_list):
+    def show_addr(self, addr_list):
         for item in addr_list:
-            print '        Virtual Network: %s' %(item.get_virtual_network())
+            print '        Virtual Network: %s' %(item['virtual_network'])
 
-    def port_show(self, port_list):
+    def show_port(self, port_list):
         for item in port_list:
-            print '        %d:%d' %(item.get_start_port(), item.get_end_port())
+            print '        %d:%d' %(item['start_port'], item['end_port'])
 
-    def action_show(self, rule):
-        list = rule.get_action_list()
-        if not list:
-            return
-        action = list.get_simple_action()
-        if action:
-            print '        %s' %(action)
-        else:
-            for item in rule.get_action_list().get_apply_service():
+    def show_action(self, rule):
+        if rule['action_list']['apply_service']:
+            for item in rule['action_list']['apply_service']:
                 print '        %s' %(item)
+        else:
+            print '        %s' %(rule['action_list']['simple_action'])
 
-    def rule_show(self, obj):
-        rules_obj = obj.get_network_policy_entries()
-        if (rules_obj == None):
+    def rule_show(self, dict):
+        if not dict.has_key('network_policy_entries'):
             return
-        list = rules_obj.get_policy_rule()
         count = 1
-        for rule in list:
+        for rule in dict['network_policy_entries']['policy_rule']:
             print 'Rule #%d' %(count)
-            print '    Direction: %s' %(rule.get_direction())
-            print '    Protocol: %s' %(rule.get_protocol())
+            print '    Direction: %s' %(rule['direction'])
+            print '    Protocol: %s' %(rule['protocol'])
             print '    Source Addresses:'
-            self.addr_show(rule.get_src_addresses())
+            self.show_addr(rule['src_addresses'])
             print '    Source Ports:'
-            self.port_show(rule.get_src_ports())
+            self.show_port(rule['src_ports'])
             print '    Destination Addresses:'
-            self.addr_show(rule.get_dst_addresses())
+            self.show_addr(rule['dst_addresses'])
             print '    Destination Ports:'
-            self.port_show(rule.get_dst_ports())
+            self.show_port(rule['dst_ports'])
             print '    Action:'
-            self.action_show(rule)
+            self.show_action(rule)
             count += 1
 
-    def obj_show(self, obj):
+    def show_obj(self, dict, obj):
         print 'Policy'
-        print 'Name: %s' %(obj.get_fq_name())
-        print 'UUID: %s' %(obj.uuid)
-        self.rule_show(obj)
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
+        self.rule_show(dict)
         list = obj.get_virtual_network_back_refs()
         if (list != None):
             print '[BR] network:'
             for item in list:
                 print '    %s' %(item['to'][2])
-
-    def show(self, args):
-        name = args.name
-        if name:
-            obj = self.obj_get(name)
-            if not obj:
-                print 'ERROR: Object %s is not found!' %(name)
-                return
-            self.obj_show(obj)
-        else:
-            for item in self.obj_list():
-                if (item['fq_name'][1] == self.tenant.name):
-                    print '    %s' %(item['fq_name'][2])
 
     def rule_add(self, arg_list):
         direction = None
@@ -522,7 +464,7 @@ class ConfigPolicy():
                 rule = self.rule_add(rule_arg.split(','))
                 rule_list.append(rule)
 
-        obj = self.obj_get(name = name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if obj:
             rules = obj.get_network_policy_entries()
             if not rules:
@@ -546,7 +488,7 @@ class ConfigPolicy():
                 print 'ERROR: %s' %(str(e))
 
     def delete(self, name, rule_arg_list):
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
             return
@@ -571,22 +513,22 @@ class ConfigPolicy():
                 print 'ERROR: %s' %(str(e))
 
 
-class ConfigSecurityGroup():
+class ConfigSecurityGroup(ConfigObj):
     def __init__(self, client):
-        self.vnc = client.vnc
-        self.tenant = client.tenant
+        super(ConfigSecurityGroup, self).__init__(client,
+                client.vnc.security_group_read)
 
-    def obj_list(self):
+    def fq_name_get(self, args):
+        fq_name = ['default-domain', self.tenant.name, args.name]
+        return fq_name
+
+    def show_list(self):
         list = self.vnc.security_groups_list()['security-groups']
-        return list
+        for item in list:
+            if (item['fq_name'][1] == self.tenant.name):
+                print '%s' %(item['fq_name'][2])
 
-    def obj_get(self, name):
-        for item in self.obj_list():
-            if (item['fq_name'][1] == self.tenant.name) and \
-                    (item['fq_name'][2] == name):
-                return self.vnc.security_group_read(id = item['uuid'])
-
-    def addr_show(self, addr_list):
+    def show_addr(self, addr_list):
         for item in addr_list:
             print '        Security Group: %s' %(item.get_security_group())
             subnet = item.get_subnet()
@@ -596,11 +538,11 @@ class ConfigSecurityGroup():
             else:
                 print '        Subnet: None'
 
-    def port_show(self, port_list):
+    def show_port(self, port_list):
         for item in port_list:
             print '        %d:%d' %(item.get_start_port(), item.get_end_port())
 
-    def rule_show(self, obj):
+    def show_rule(self, obj):
         rules_obj = obj.get_security_group_entries()
         if (rules_obj == None):
             return
@@ -611,33 +553,20 @@ class ConfigSecurityGroup():
             print '    Direction: %s' %(rule.get_direction())
             print '    Protocol: %s' %(rule.get_protocol())
             print '    Source Addresses:'
-            self.addr_show(rule.get_src_addresses())
+            self.show_addr(rule.get_src_addresses())
             print '    Source Ports:'
-            self.port_show(rule.get_src_ports())
+            self.show_port(rule.get_src_ports())
             print '    Destination Addresses:'
-            self.addr_show(rule.get_dst_addresses())
+            self.show_addr(rule.get_dst_addresses())
             print '    Destination Ports:'
-            self.port_show(rule.get_dst_ports())
+            self.show_port(rule.get_dst_ports())
             count += 1
 
-    def obj_show(self, obj):
+    def show_obj(self, dict, obj):
         print 'Security Group'
-        print 'Name: %s' %(obj.get_fq_name())
-        print 'UUID: %s' %(obj.uuid)
-        self.rule_show(obj)
-
-    def show(self, args):
-        name = args.name
-        if name:
-            obj = self.obj_get(name)
-            if not obj:
-                print 'ERROR: Object %s is not found!' %(name)
-                return
-            self.obj_show(obj)
-        else:
-            for item in self.obj_list():
-                if (item['fq_name'][1] == self.tenant.name):
-                    print '    %s' %(item['fq_name'][2])
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
+        self.show_rule(obj)
 
     def add(self, name, protocol = None, address = None, port = None,
             direction = None):
@@ -689,7 +618,7 @@ class ConfigSecurityGroup():
             rule.set_dst_addresses(addr_list)
             rule.set_dst_ports(port_list)
 
-        obj = self.obj_get(name = name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if obj:
             rules = obj.get_security_group_entries()
             if not rules:
@@ -719,7 +648,7 @@ class ConfigSecurityGroup():
         self.vnc.security_group_update(obj)
 
     def delete(self, name, rule = None):
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
             return
@@ -733,22 +662,22 @@ class ConfigSecurityGroup():
                 print 'ERROR: %s' %(str(e))
 
 
-class ConfigNetwork():
+class ConfigNetwork(ConfigObj):
     def __init__(self, client):
-        self.vnc = client.vnc
-        self.tenant = client.tenant
+        super(ConfigNetwork, self).__init__(client,
+                client.vnc.virtual_network_read)
 
-    def obj_list(self):
+    def fq_name_get(self, args):
+        fq_name = ['default-domain', self.tenant.name, args.name]
+        return fq_name
+
+    def show_list(self):
         list = self.vnc.virtual_networks_list()['virtual-networks']
-        return list
+        for item in list:
+            if (item['fq_name'][1] == self.tenant.name):
+                print '%s' %(item['fq_name'][2])
 
-    def obj_get(self, name):
-        for item in self.obj_list():
-            if (item['fq_name'][1] == self.tenant.name) and \
-                    (item['fq_name'][2] == name):
-                return self.vnc.virtual_network_read(id = item['uuid'])
-
-    def prop_route_target_show(self, obj):
+    def show_prop_route_target(self, obj):
         print '[P] Route targets:'
         rt_list = obj.get_route_target_list()
         if not rt_list:
@@ -756,7 +685,7 @@ class ConfigNetwork():
         for rt in rt_list.get_route_target():
             print '    %s' %(rt)
 
-    def child_floating_ip_pool_show(self, obj):
+    def show_child_floating_ip_pool(self, obj):
         print '[C] Floating IP pools:'
         pool_list = obj.get_floating_ip_pools()
         if not pool_list:
@@ -770,7 +699,7 @@ class ConfigNetwork():
                     ip_obj = self.vnc.floating_ip_read(id = ip['uuid'])
                     print '        %s' %(ip_obj.get_floating_ip_address())
 
-    def ref_ipam_show(self, obj):
+    def show_ref_ipam(self, obj):
         print '[R] IPAMs:'
         ipam_list = obj.get_network_ipam_refs()
         if not ipam_list:
@@ -784,7 +713,7 @@ class ConfigNetwork():
                         subnet.get_subnet().get_ip_prefix_len(),
                         subnet.get_default_gateway())
 
-    def ref_policy_show(self, obj):
+    def show_ref_policy(self, obj):
         print '[R] Policies:'
         policy_list = obj.get_network_policy_refs()
         if not policy_list:
@@ -794,7 +723,7 @@ class ConfigNetwork():
                     item['attr'].get_sequence().get_major(),
                     item['attr'].get_sequence().get_minor())
 
-    def ref_route_table_show(self, obj):
+    def show_ref_route_table(self, obj):
         print '[R] Route Tables:'
         rt_list = obj.get_route_table_refs()
         if not rt_list:
@@ -802,33 +731,20 @@ class ConfigNetwork():
         for item in rt_list:
             print '    %s' %(item['to'][2])
 
-    def obj_show(self, obj):
+    def show_obj(self, dict, obj):
         print 'Virtual Network'
-        print 'Name: %s' %(obj.get_fq_name())      
-        print 'UUID: %s' %(obj.uuid)
-        self.prop_route_target_show(obj)
-        self.child_floating_ip_pool_show(obj)
-        self.ref_ipam_show(obj)
-        self.ref_policy_show(obj)
-        self.ref_route_table_show(obj)
-
-    def show(self, args):
-        name = args.name
-        if name:
-            obj = self.obj_get(name)
-            if not obj:
-                print 'ERROR: Object %s is not found!' %(name)
-                return
-            self.obj_show(obj)
-        else:
-            for item in self.obj_list():
-                if (item['fq_name'][1] == self.tenant.name):
-                    print '    %s' %(item['fq_name'][2])
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
+        self.show_prop_route_target(obj)
+        self.show_child_floating_ip_pool(obj)
+        self.show_ref_ipam(obj)
+        self.show_ref_policy(obj)
+        self.show_ref_route_table(obj)
 
     def ipam_add(self, obj, name, subnet, gateway = None):
         try:
-            ipam_obj = self.vnc.network_ipam_read(fq_name = ['default-domain',
-                    self.tenant.name, name])
+            ipam_obj = self.vnc.network_ipam_read(
+                    fq_name = ['default-domain', self.tenant.name, name])
         except Exception as e:
             print 'ERROR: %s' %(str(e))
             return
@@ -852,8 +768,8 @@ class ConfigNetwork():
 
     def ipam_del(self, obj, name):
         try:
-            ipam_obj = self.vnc.network_ipam_read(fq_name = ['default-domain',
-                    self.tenant.name, name])
+            ipam_obj = self.vnc.network_ipam_read(
+                    fq_name = ['default-domain', self.tenant.name, name])
         except Exception as e:
             print 'ERROR: %s' %(str(e))
             return
@@ -914,10 +830,9 @@ class ConfigNetwork():
             route_target = None, route_table = None, shared = None,
             external = None, l2 = None):
         create = False
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
-            obj = vnc_api.VirtualNetwork(name = name,
-                    parent_obj = self.tenant)
+            obj = vnc_api.VirtualNetwork(name = name, parent_obj = self.tenant)
             if l2:
                 prop = vnc_api.VirtualNetworkType(forwarding_mode = 'l2')
                 obj.set_virtual_network_properties(prop)
@@ -945,9 +860,10 @@ class ConfigNetwork():
     def delete(self, name, ipam = None, policy = None, route_target = None,
             route_table = None):
         update = False
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
+            return
         if ipam:
             self.ipam_del(obj, ipam)
             update = True
@@ -969,28 +885,28 @@ class ConfigNetwork():
                 print 'ERROR: %s' %(str(e))
 
 
-class ConfigFloatingIpPool():
+class ConfigFloatingIpPool(ConfigObj):
     def __init__(self, client):
-        self.vnc = client.vnc
-        self.tenant = client.tenant
+        super(ConfigFloatingIpPool, self).__init__(client,
+                client.vnc.floating_ip_pool_read)
 
-    def obj_list(self):
+    def fq_name_get(self, args):
         list = self.vnc.floating_ip_pools_list()['floating-ip-pools']
-        return list
+        for item in list:
+            if (item['fq_name'][1] == self.tenant.name) and \
+                    (item['fq_name'][3] == args.name):
+                break
+        else:
+            return ['default-domain', self.tenant.name, '', args.name]
+        return item['fq_name']
 
-    def obj_get(self, name, network = None):
-        for item in self.obj_list():
-            if network:
-                if (item['fq_name'][1] == self.tenant.name) and \
-                        (item['fq_name'][2] == network) and \
-                        (item['fq_name'][3] == name):
-                    return self.vnc.floating_ip_pool_read(id = item['uuid'])
-            else:
-                if (item['fq_name'][1] == self.tenant.name) and \
-                        (item['fq_name'][3] == name):
-                    return self.vnc.floating_ip_pool_read(id = item['uuid'])
+    def show_list(self):
+        list = self.vnc.floating_ip_pools_list()['floating-ip-pools']
+        for item in list:
+            if (item['fq_name'][1] == self.tenant.name):
+                print '%s' %(item['fq_name'][3])
 
-    def prop_subnet_show(self, obj):
+    def show_prop_subnet(self, obj):
         print '[P] Subnet:'
         prefixes = obj.get_floating_ip_pool_prefixes()
         if not prefixes:
@@ -998,7 +914,7 @@ class ConfigFloatingIpPool():
         for item in prefixes.get_subnet():
             print '    %s/%s' %(item.get_ip_prefix(), item.get_ip_prefix_len())
 
-    def child_ip_show(self, obj):
+    def show_child_ip(self, obj):
         print '[C] Floating IPs:'
         list = obj.get_floating_ips()
         if not list:
@@ -1007,7 +923,7 @@ class ConfigFloatingIpPool():
             ip_obj = self.vnc.floating_ip_read(id = ip['uuid'])
             print '    %s' %(ip_obj.get_floating_ip_address())
 
-    def back_ref_tenant_show(self, obj):
+    def show_back_ref_tenant(self, obj):
         print '[BR] Tenants:'
         list = obj.get_project_back_refs()
         if not list:
@@ -1015,27 +931,13 @@ class ConfigFloatingIpPool():
         for item in list:
             print '    %s' %(item['to'][1])
 
-    def obj_show(self, obj):
+    def show_obj(self, dict, obj):
         print 'Floating IP Pool'
-        print 'Name: %s' %(obj.get_fq_name())
-        print 'UUID: %s' %(obj.uuid)
-        self.prop_subnet_show(obj)
-        self.child_ip_show(obj)
-        self.back_ref_tenant_show(obj)
-
-    def show(self, args = None):
-        name = args.name
-        if name:
-            obj = self.obj_get(name)
-            if not obj:
-                print 'ERROR: Object %s is not found!' %(name)
-                return
-            self.obj_show(obj)
-        else:
-            for item in self.obj_list():
-                if (item['fq_name'][1] == self.tenant.name):
-                    print '    %s in network %s' \
-                            %(item['fq_name'][2], item['fq_name'][3])
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
+        self.show_prop_subnet(obj)
+        self.show_child_ip(obj)
+        self.show_back_ref_tenant(obj)
 
     def add(self, name, network):
         if not name:
@@ -1065,7 +967,7 @@ class ConfigFloatingIpPool():
         if not name:
             print 'ERROR: The name of floating IP pool is not specified!'
             return
-        obj = self.obj_get(name, network)
+        obj = self.obj_get(['default-domain', self.tenant.name, network, name])
         if not obj:
             print 'ERROR: Floating IP pool %s in network %s is not found!' \
                     %(name, network)
@@ -1083,24 +985,24 @@ class ConfigFloatingIpPool():
             print 'ERROR: %s' %(str(e))
 
 
-class ConfigServiceTemplate():
+class ConfigServiceTemplate(ConfigObj):
     def __init__(self, client):
-        self.vnc = client.vnc
-        self.tenant = client.tenant
+        super(ConfigServiceTemplate, self).__init__(client,
+                client.vnc.service_template_read)
 
-    def obj_list(self):
+    def fq_name_get(self, args):
+        fq_name = ['default-domain', args.name]
+        return fq_name
+
+    def show_list(self):
         list = self.vnc.service_templates_list()['service-templates']
-        return list
+        for item in list:
+            print '%s' %(item['fq_name'][1])
 
-    def obj_get(self, name):
-        for item in self.obj_list():
-            if (item['fq_name'][1] == name):
-                return self.vnc.service_template_read(id = item['uuid'])
-
-    def obj_show(self, obj):
+    def show_obj(self, dict, obj):
         print 'Service Template'
-        print 'Name: %s' %(obj.get_fq_name())      
-        print 'UUID: %s' %(obj.uuid)
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
         properties = obj.get_service_template_properties()
         print 'Service Mode: %s' %(properties.get_service_mode())
         print 'Service Type: %s' %(properties.get_service_type())
@@ -1109,18 +1011,6 @@ class ConfigServiceTemplate():
         print 'Service Interfaces:'
         for item in properties.get_interface_type():
             print '    %s' %(item.get_service_interface_type())
-
-    def show(self, args = None):
-        name = args.name
-        if name:
-            obj = self.obj_get(name)
-            if not obj:
-                print 'ERROR: Object %s is not found!' %(name)
-                return
-            self.obj_show(obj)
-        else:
-            for item in self.obj_list():
-                print '    %s' %(item['fq_name'][1])
 
     def add(self, name, mode, type, image, flavor, interface_type,
             scale = None):
@@ -1156,7 +1046,7 @@ class ConfigServiceTemplate():
             print 'ERROR: %s' %(str(e))
 
     def delete(self, name):
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', name])
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
         try:
@@ -1165,38 +1055,25 @@ class ConfigServiceTemplate():
             print 'ERROR: %s' %(str(e))
 
 
-class ConfigServiceInstance():
+class ConfigServiceInstance(ConfigObj):
     def __init__(self, client):
-        self.vnc = client.vnc
-        self.tenant = client.tenant
+        super(ConfigServiceInstance, self).__init__(client,
+                client.vnc.service_instance_read)
 
-    def obj_list(self):
+    def fq_name_get(self, args):
+        fq_name = ['default-domain', self.tenant.name, args.name]
+        return fq_name
+
+    def show_list(self):
         list = self.vnc.service_instances_list()['service-instances']
-        return list
+        for item in list:
+            if (item['fq_name'][1] == self.tenant.name):
+                print '%s' %(item['fq_name'][2])
 
-    def obj_get(self, name):
-        for item in self.obj_list():
-            if (item['fq_name'][1] == self.tenant.name) and \
-                    (item['fq_name'][2] == name):
-                return self.vnc.service_instance_read(id = item['uuid'])
-
-    def obj_show(self, obj):
+    def show_obj(self, dict, obj):
         print 'Service Instance'
-        print 'Name: %s' %(obj.get_fq_name())      
-        print 'UUID: %s' %(obj.uuid)
-
-    def show(self, args):
-        name = args.name
-        if name:
-            obj = self.obj_get(name)
-            if not obj:
-                print 'ERROR: Object %s is not found!' %(name)
-                return
-            self.obj_show(obj)
-        else:
-            for item in self.obj_list():
-                if (item['fq_name'][1] == self.tenant.name):
-                    print '    %s' %(item['fq_name'][2])
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
 
     def add(self, name, template, network_list,
             auto_policy = None, scale_max = None):
@@ -1253,7 +1130,7 @@ class ConfigServiceInstance():
             print 'ERROR: %s' %(str(e))
 
     def delete(self, name):
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
         try:
@@ -1277,11 +1154,10 @@ class ConfigImage():
 
     def obj_show(self, obj):
         print 'Image'
-        print 'Name: %s' %(obj.name)      
+        print 'Name: %s' %(obj.name)
         print 'UUID: %s' %(obj.id)
 
-    def show(self, args = None):
-        name = args.name
+    def show(self, name = None):
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1313,11 +1189,10 @@ class ConfigFlavor():
 
     def obj_show(self, obj):
         print 'Flavor'
-        print 'Name: %s' %(obj.name)      
+        print 'Name: %s' %(obj.name)
         print 'UUID: %s' %(obj.id)
 
-    def show(self, args = None):
-        name = args.name
+    def show(self, name = None):
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1351,15 +1226,14 @@ class ConfigVirtualMachine():
 
     def obj_show(self, obj):
         print 'Virtual Machine'
-        print 'Name: %s' %(obj.name)      
+        print 'Name: %s' %(obj.name)
         print 'UUID: %s' %(obj.id)
         print 'Status: %s' %(obj.status)
         print 'Addresses:'
         for item in obj.addresses.keys():
             print '    %s  %s' %(obj.addresses[item][0]['addr'], item)
 
-    def show(self, args):
-        name = args.name
+    def show(self, name):
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1429,43 +1303,30 @@ class ConfigVirtualMachine():
         self.nova.servers.delete(obj.id)
 
 
-class ConfigRouteTable():
+class ConfigRouteTable(ConfigObj):
     def __init__(self, client):
-        self.vnc = client.vnc
-        self.tenant = client.tenant
+        super(ConfigRouteTable, self).__init__(client,
+                client.vnc.route_table_read)
 
-    def obj_list(self):
+    def fq_name_get(self, args):
+        fq_name = ['default-domain', self.tenant.name, args.name]
+        return fq_name
+
+    def show_list(self):
         list = self.vnc.route_tables_list()['route-tables']
-        return list
+        for item in list:
+            if (item['fq_name'][1] == self.tenant.name):
+                print '%s' %(item['fq_name'][2])
 
-    def obj_get(self, name):
-        for item in self.obj_list():
-            if (item['fq_name'][1] == self.tenant.name) and \
-                    (item['fq_name'][2] == name):
-                return self.vnc.route_table_read(id = item['uuid'])
-
-    def obj_show(self, obj):
+    def show_obj(self, dict, obj):
         print 'Route Table'
-        print 'Name: %s' %(obj.get_fq_name())      
-        print 'UUID: %s' %(obj.uuid)
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
         routes = obj.get_routes()
         if not routes:
             return
         for item in routes.get_route():
             print '  %s next-hop %s' %(item.get_prefix(), item.get_next_hop())
-
-    def show(self, args = None):
-        name = args.name
-        if name:
-            obj = self.obj_get(name)
-            if not obj:
-                print 'ERROR: Object %s is not found!' %(name)
-                return
-            self.obj_show(obj)
-        else:
-            for item in self.obj_list():
-                if (item['fq_name'][1] == self.tenant.name):
-                    print '    %s' %(item['fq_name'][2])
 
     def route_add(self, obj, route):
         routes = obj.get_routes()
@@ -1486,7 +1347,7 @@ class ConfigRouteTable():
 
     def add(self, name, route = None):
         create = False
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             obj = vnc_api.RouteTable(name = name, parent_obj = self.tenant)
             create = True
@@ -1502,7 +1363,7 @@ class ConfigRouteTable():
             self.vnc.route_table_update(obj)
 
     def delete(self, name, route = None):
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
         if route:
@@ -1516,25 +1377,25 @@ class ConfigRouteTable():
                 print 'ERROR: %s' %(str(e))
 
 
-class ConfigInterfaceRouteTable():
+class ConfigInterfaceRouteTable(ConfigObj):
     def __init__(self, client):
-        self.vnc = client.vnc
-        self.tenant = client.tenant
+        super(ConfigInterfaceRouteTable, self).__init__(client,
+                client.vnc.interface_route_table_read)
 
-    def obj_list(self):
+    def fq_name_get(self, args):
+        fq_name = ['default-domain', self.tenant.name, args.name]
+        return fq_name
+
+    def show_list(self):
         list = self.vnc.interface_route_tables_list()['interface-route-tables']
-        return list
+        for item in list:
+            if (item['fq_name'][1] == self.tenant.name):
+                print '%s' %(item['fq_name'][2])
 
-    def obj_get(self, name):
-        for item in self.obj_list():
-            if (item['fq_name'][1] == self.tenant.name) and \
-                    (item['fq_name'][2] == name):
-                return self.vnc.interface_route_table_read(id = item['uuid'])
-
-    def obj_show(self, obj):
+    def show_obj(self, dict, obj):
         print 'Interface Route Table'
-        print 'Name: %s' %(obj.get_fq_name())      
-        print 'UUID: %s' %(obj.uuid)
+        print 'Name: %s' %(dict['fq_name'])
+        print 'UUID: %s' %(dict['uuid'])
         try:
             af = obj.get_interface_route_table_family()
             print 'Address Family: %s' %(af)
@@ -1545,19 +1406,6 @@ class ConfigInterfaceRouteTable():
             return
         for item in routes.get_route():
             print '  %s' %(item.get_prefix())
-
-    def show(self, args = None):
-        name = args.name
-        if name:
-            obj = self.obj_get(name)
-            if not obj:
-                print 'ERROR: Object %s is not found!' %(name)
-                return
-            self.obj_show(obj)
-        else:
-            for item in self.obj_list():
-                if (item['fq_name'][1] == self.tenant.name):
-                    print '    %s' %(item['fq_name'][2])
 
     def route_add(self, obj, prefix):
         routes = obj.get_interface_route_table_routes()
@@ -1577,7 +1425,7 @@ class ConfigInterfaceRouteTable():
 
     def add(self, name, route_list = None, af = None):
         create = False
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             obj = vnc_api.InterfaceRouteTable(name = name,
                     parent_obj = self.tenant)
@@ -1599,7 +1447,7 @@ class ConfigInterfaceRouteTable():
             self.vnc.interface_route_table_update(obj)
 
     def delete(self, name, route = None):
-        obj = self.obj_get(name)
+        obj = self.obj_get(['default-domain', self.tenant.name, name])
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
         if route:
@@ -1707,7 +1555,7 @@ class ConfigVmInterface():
 
     def obj_show(self, obj, name):
         print 'Virtual Machine Interface'
-        print 'Name: %s' %(name)      
+        print 'Name: %s' %(name)
         print 'UUID: %s' %(obj.uuid)
         self.prop_mac_show(obj)
         self.prop_prop_show(obj)
@@ -1717,7 +1565,7 @@ class ConfigVmInterface():
         self.back_ref_ip_show(obj)
         self.back_ref_fip_show(obj)
 
-    def show(self, args = None):
+    def show(self, args):
         name = args.name
         if name:
             obj = self.obj_get(name)
@@ -1892,13 +1740,12 @@ class ConfigBgpRouter():
 
     def obj_show(self, obj, name):
         print 'BGP Peer'
-        print 'Name: %s' %(name)      
+        print 'Name: %s' %(name)
         print 'UUID: %s' %(obj.uuid)
         self.prop_show(obj)
         self.ref_bgp_router_show(obj)
 
-    def show(self, args = None):
-        name = args.name
+    def show(self, name = None):
         if name:
             obj = self.obj_get(name)
             if not obj:
@@ -1979,8 +1826,7 @@ class ConfigGlobalVrouter():
     def obj_show(self, obj):
         pass
 
-    def show(self, args = None):
-        name = args.name
+    def show(self, name = None):
         obj = self.obj_get('dummy')
         print 'Link Local Service'
         for item in obj.get_linklocal_services().get_linklocal_service_entry():
