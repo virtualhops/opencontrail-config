@@ -226,12 +226,6 @@ class ConfigShell():
         sub_parser.add_argument('--shared', action = 'store_true',
                 help = 'Enable IP address sharing')
 
-        sub_parser = subparsers.add_parser('instance-ip',
-                help = 'Instance IP address')
-        sub_parser.set_defaults(obj_class = ConfigInstanceIp,
-                obj_parser = sub_parser)
-        self.add_common_args(sub_parser)
-
         sub_parser = subparsers.add_parser('image',
                 help = 'Virtual Machine Image')
         self.sub_cmd_dict['image'] = sub_parser
@@ -291,8 +285,8 @@ class ConfigShell():
         sub_parser.add_argument('--auto-policy', action = 'store_true',
                 help = 'Enable automatic policy')
 
-        sub_parser = subparsers.add_parser('bgp-peer',
-                help = 'BGP Peer')
+        sub_parser = subparsers.add_parser('bgp-router',
+                help = 'BGP Router')
         sub_parser.set_defaults(obj_class = ConfigBgpRouter,
                 obj_parser = sub_parser)
         self.add_common_args(sub_parser)
@@ -301,25 +295,29 @@ class ConfigShell():
         sub_parser.add_argument('--asn', metavar = '<number>',
                 help = 'The number autonomous system')
         sub_parser.add_argument('--address', metavar = '<address>',
-                help = 'The IP address of BGP peer')
+                help = 'The IP address of BGP router')
         sub_parser.add_argument('--identifier', metavar = '<identifier>',
-                help = 'The identifier of BGP peer')
+                help = 'The identifier of BGP router')
         sub_parser.add_argument('--control', action = 'store_true',
-                help = 'BGP peer is control node')
+                help = 'BGP router is control node')
 
-        sub_parser = subparsers.add_parser('link-local',
-                help = 'Link Local Service')
+        sub_parser = subparsers.add_parser('vrouter',
+                help = 'vRouter')
+        sub_parser.set_defaults(obj_class = ConfigVrouter,
+                obj_parser = sub_parser)
+        self.add_common_args(sub_parser)
+        sub_parser.add_argument('--address', metavar = '<address>',
+                help = 'The IP address of virtual router')
+
+        sub_parser = subparsers.add_parser('global-vrouter',
+                help = 'Global vRouter')
         sub_parser.set_defaults(obj_class = ConfigGlobalVrouter,
                 obj_parser = sub_parser)
         self.add_common_args(sub_parser)
-        sub_parser.add_argument('--link-local-address',
-                metavar = '<address>',
-                help = 'Link Local service address and port ' \
-                       '<link local address>:<link local port>')
-        sub_parser.add_argument('--fabric-address',
-                metavar = '<address>',
-                help = 'Fabric address and port ' \
-                       '<fabric address>:<fabric port>')
+        sub_parser.add_argument('--linklocal', action = 'append',
+                metavar = '<arguments>',
+                help = 'name=<name>,linklocal-address=<address>:<port>,' \
+                       'fabric-address=<address>:<port>')
         self.parser = parser
 
     def parse(self, argv = None):
@@ -333,6 +331,9 @@ class ConfigShell():
         elif args.cmd == 'show':
             obj.show(args)
         elif args.cmd == 'add':
+            if not args.name:
+                print 'ERROR: Name is not specified!'
+                return
             if (args.obj_class == ConfigTenant):
                 obj.add(args.name)
             elif (args.obj_class == ConfigVirtualDns):
@@ -374,9 +375,13 @@ class ConfigShell():
                 obj.add(args.name, args.vendor, args.asn, args.address,
                         args.identifier, args.control)
             elif (args.obj_class == ConfigGlobalVrouter):
-                obj.add(args.name, args.link_local_address,
-                        args.fabric_address)
+                obj.add(args.name, args.linklocal)
+            elif (args.obj_class == ConfigVrouter):
+                obj.add(args.name, args.address)
         elif args.cmd == 'delete':
+            if not args.name:
+                print 'ERROR: Name is not specified!'
+                return
             if (args.obj_class == ConfigTenant):
                 obj.delete(args.name)
             elif (args.obj_class == ConfigVirtualDns):
@@ -411,6 +416,8 @@ class ConfigShell():
             elif (args.obj_class == ConfigBgpRouter):
                 obj.delete(args.name)
             elif (args.obj_class == ConfigGlobalVrouter):
+                obj.delete(args.name, args.linklocal)
+            elif (args.obj_class == ConfigVrouter):
                 obj.delete(args.name)
         else:
             print 'Unknown action %s' %(args.cmd)
