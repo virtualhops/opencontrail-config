@@ -412,7 +412,7 @@ class ConfigShell():
                            args.interface_route_table, args.address,
                            args.floating_ip)
             elif (args.obj_class == ConfigPort):
-                obj.delete(args.name)
+                obj.delete(args.name, args.network, args.address)
             elif (args.obj_class == ConfigBgpRouter):
                 obj.delete(args.name)
             elif (args.obj_class == ConfigGlobalVrouter):

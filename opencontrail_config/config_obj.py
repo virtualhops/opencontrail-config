@@ -1147,7 +1147,7 @@ class ConfigPort(ConfigObject):
         if not ref_list:
             return
         for item in ref_list:
-            print '    %s' %(item['to'][2])
+            print '    %s' %(item['to'][0])
 
     def show_back_ref_ip(self, obj):
         print '[BR] Instance IP:'
@@ -1170,19 +1170,25 @@ class ConfigPort(ConfigObject):
         self.show_back_ref_ip(obj)
 
     def add(self, name, network, address, shared):
+        update = False
         if name == 'auto':
             id = str(uuid.uuid4())
             port_obj = vnc_api.VirtualMachineInterface(name = id, 
                     parent_obj = self.tenant)
             port_obj.uuid = id
         else:
-            port_obj = vnc_api.VirtualMachineInterface(name = name, 
-                    parent_obj = self.tenant)
+            port_obj = self.obj_get(name)
+            if port_obj:
+                update= True
+            else:
+                port_obj = vnc_api.VirtualMachineInterface(name = name, 
+                        parent_obj = self.tenant)
 
         net_obj = self.vnc.virtual_network_read(
                 fq_name = ['default-domain', self.tenant.name, network])
-        port_obj.set_virtual_network(net_obj)
-        self.vnc.virtual_machine_interface_create(port_obj)
+        if not update:
+            port_obj.set_virtual_network(net_obj)
+            self.vnc.virtual_machine_interface_create(port_obj)
 
         id = str(uuid.uuid4())
         ip_obj = vnc_api.InstanceIp(name = id) 
@@ -1194,15 +1200,26 @@ class ConfigPort(ConfigObject):
             ip_obj.set_instance_ip_mode(u'active-active')
         ip_obj.add_virtual_machine_interface(port_obj)
         self.vnc.instance_ip_create(ip_obj)
+
         print port_obj.uuid
 
-    def delete(self, name):
+    def delete(self, name, network, address):
+        update = False
         obj = self.obj_get(name, msg = True)
         if not obj:
             return
-        for item in obj.get_instance_ip_back_refs():
-            self.vnc.instance_ip_delete(id = item['uuid'])
-        self.vnc.virtual_machine_interface_delete(id = obj.uuid)
+        if address:
+            for item in obj.get_instance_ip_back_refs():
+                ip_obj = self.vnc.instance_ip_read(id = item['uuid'])
+                if (ip_obj.get_instance_ip_address() == address):
+                    self.vnc.instance_ip_delete(id = item['uuid'])
+                    break
+            update = True
+
+        if not update:
+            for item in obj.get_instance_ip_back_refs():
+                self.vnc.instance_ip_delete(id = item['uuid'])
+            self.vnc.virtual_machine_interface_delete(id = obj.uuid)
 
 
 class ConfigVmInterface():
