@@ -1190,12 +1190,15 @@ class ConfigPort(ConfigObject):
             port_obj.set_virtual_network(net_obj)
             self.vnc.virtual_machine_interface_create(port_obj)
 
-        id = str(uuid.uuid4())
-        ip_obj = vnc_api.InstanceIp(name = id) 
-        ip_obj.uuid = id
+        ip_obj = vnc_api.InstanceIp(name = str(uuid.uuid4()))
+        ip_obj.uuid = ip_obj.name
         ip_obj.add_virtual_network(net_obj)
         if address:
             ip_obj.set_instance_ip_address(address)
+            if (len(address.split(':')) > 1):
+                ip_obj.set_instance_ip_family('v6')
+            else:
+                ip_obj.set_instance_ip_family('v4')
         if shared:
             ip_obj.set_instance_ip_mode(u'active-active')
         ip_obj.add_virtual_machine_interface(port_obj)
