@@ -9,7 +9,8 @@ default_client_args = [
     ('--auth-tenant', 'admin'),
     ('--auth-region', 'RegionOne'),
     ('--auth-server', '127.0.0.1'),
-    ('--api-server', '127.0.0.1')]
+    ('--api-server', '127.0.0.1'),
+    ('--tenant', 'demo')]
 
 if __name__ == '__main__':
     for arg in default_client_args:
