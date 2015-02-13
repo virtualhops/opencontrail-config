@@ -1884,19 +1884,19 @@ class ConfigVirtualMachine():
 class ConfigClient():
     def __init__(self, auth_username, auth_password, auth_tenant, api_server,
             region, auth_server, tenant):
-        self.vnc = vnc_api.VncApi(username = auth_username, auth_password = password,
-                tenant_name = auth_tenant, api_server_host = api_server,
-                auth_host = auth_server)
+        self.vnc = vnc_api.VncApi(username = auth_username,
+                password = auth_password, tenant_name = auth_tenant,
+                api_server_host = api_server, auth_host = auth_server)
         if config_nova:
             self.nova = novaclient.v1_1.client.Client(username = auth_username,
-                    api_key = password, project_id = auth_tenant,
+                    api_key = auth_password, project_id = auth_tenant,
                     region_name = region,
                     auth_url = 'http://%s:35357/v2.0' %(auth_server))
         else:
             self.nova = None
         try:
             self.tenant = self.vnc.project_read(
-                    fq_name = ['default-domain', tenant]) 
+                    fq_name = ['default-domain', tenant])
         except:
             self.tenant = None
 
