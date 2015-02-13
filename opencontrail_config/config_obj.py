@@ -1885,7 +1885,8 @@ class ConfigClient():
     def __init__(self, username, password, tenant, api_server,
             region, auth_server):
         self.vnc = vnc_api.VncApi(username = username, password = password,
-                tenant_name = tenant, api_server_host = api_server)
+                tenant_name = tenant, api_server_host = api_server,
+                auth_host = auth_server)
         if config_nova:
             self.nova = novaclient.v1_1.client.Client(username = username,
                     api_key = password, project_id = tenant,
