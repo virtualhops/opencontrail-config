@@ -37,6 +37,7 @@ class ConfigShell():
         parser.add_argument('--auth-region', help = 'Region name')
         parser.add_argument('--auth-server', help = 'Auth server address')
         parser.add_argument('--api-server', help = 'API server address')
+        parser.add_argument('--tenant', help = 'Tenant name')
 
         parser.add_argument('cmd', choices = ['add', 'show', 'delete', 'help'],
                 metavar = '<command>', help = '[ add | show | delete | help ]')
@@ -429,7 +430,7 @@ class ConfigShell():
         #return
         client = ConfigClient(args.auth_username, args.auth_password,
                 args.auth_tenant, args.api_server, args.auth_region,
-                args.auth_server)
+                args.auth_server, args.tenant)
         self.run(args, client)
 
 
