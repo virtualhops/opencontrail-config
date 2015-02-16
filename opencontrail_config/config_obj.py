@@ -1887,13 +1887,14 @@ class ConfigClient():
         self.vnc = vnc_api.VncApi(username = auth_username,
                 password = auth_password, tenant_name = auth_tenant,
                 api_server_host = api_server, auth_host = auth_server)
+        self.nova = None
         if config_nova:
             self.nova = novaclient.v1_1.client.Client(username = auth_username,
                     api_key = auth_password, project_id = auth_tenant,
                     region_name = region,
                     auth_url = 'http://%s:35357/v2.0' %(auth_server))
-        else:
-            self.nova = None
+        if not tenant:
+            tenant = auth_tenant
         try:
             self.tenant = self.vnc.project_read(
                     fq_name = ['default-domain', tenant])
