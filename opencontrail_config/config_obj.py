@@ -1538,7 +1538,7 @@ class ConfigBgpRouter(ConfigObject):
         ref_list = obj.get_bgp_router_refs()
         if not ref_list:
             return
-        for item in ref_list():
+        for item in ref_list:
             print '        %s' %(item['to'][4])
 
     def show_obj(self, obj):
