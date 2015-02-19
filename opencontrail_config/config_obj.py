@@ -1149,6 +1149,22 @@ class ConfigPort(ConfigObject):
         for item in ref_list:
             print '    %s' %(item['to'][0])
 
+    def show_ref_sg(self, obj):
+        print '[R] Security Group:'
+        ref_list = obj.get_security_group_refs()
+        if not ref_list:
+            return
+        for item in ref_list:
+            print '    %s' %(item['to'][2])
+
+    def show_ref_irt(self, obj):
+        print '[R] Interface Route Table:'
+        list = obj.get_interface_route_table_refs()
+        if not list:
+            return
+        for item in list:
+            print '    %s' %(item['to'][2])
+
     def show_back_ref_ip(self, obj):
         print '[BR] Instance IP:'
         ref_list = obj.get_instance_ip_back_refs()
@@ -1157,6 +1173,15 @@ class ConfigPort(ConfigObject):
         for item in ref_list:
             ip_obj = self.vnc.instance_ip_read(id = item['to'][0])
             print '    %s' %(ip_obj.get_instance_ip_address())
+
+    def show_back_ref_fip(self, obj):
+        print '[BR] Floating IP:'
+        list = obj.get_floating_ip_back_refs()
+        if not list:
+            return
+        for item in list:
+            ip = self.vnc.floating_ip_read(id = item['uuid'])
+            print '    %s' %(ip.get_floating_ip_address())
 
     def show_obj(self, obj):
         print '## Port'
@@ -1167,29 +1192,14 @@ class ConfigPort(ConfigObject):
                 ).get_mac_address())
         self.show_ref_vm(obj)
         self.show_ref_network(obj)
+        self.show_ref_sg(obj)
+        self.show_ref_irt(obj)
         self.show_back_ref_ip(obj)
+        self.show_back_ref_fip(obj)
 
-    def add(self, name, network, address, shared):
-        update = False
-        if name == 'auto':
-            id = str(uuid.uuid4())
-            port_obj = vnc_api.VirtualMachineInterface(name = id, 
-                    parent_obj = self.tenant)
-            port_obj.uuid = id
-        else:
-            port_obj = self.obj_get(name)
-            if port_obj:
-                update= True
-            else:
-                port_obj = vnc_api.VirtualMachineInterface(name = name, 
-                        parent_obj = self.tenant)
-
+    def add_ip(self, obj, address, network, shared):
         net_obj = self.vnc.virtual_network_read(
                 fq_name = ['default-domain', self.tenant.name, network])
-        if not update:
-            port_obj.set_virtual_network(net_obj)
-            self.vnc.virtual_machine_interface_create(port_obj)
-
         ip_obj = vnc_api.InstanceIp(name = str(uuid.uuid4()))
         ip_obj.uuid = ip_obj.name
         ip_obj.add_virtual_network(net_obj)
@@ -1201,25 +1211,87 @@ class ConfigPort(ConfigObject):
                 ip_obj.set_instance_ip_family('v4')
         if shared:
             ip_obj.set_instance_ip_mode(u'active-active')
-        ip_obj.add_virtual_machine_interface(port_obj)
+        ip_obj.add_virtual_machine_interface(obj)
         self.vnc.instance_ip_create(ip_obj)
+
+    def add_network(self, obj, network):
+        net_obj = self.vnc.virtual_network_read(
+                fq_name = ['default-domain', self.tenant.name, network])
+        obj.add_virtual_network(net_obj)
+
+    def add_sg(self, obj, sg):
+        try:
+            sg_obj = self.vnc.security_group_read(
+                    fq_name = ['default-domain', self.tenant.name, sg])
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+            return
+        obj.add_security_group(sg_obj)
+
+    def add(self, name, network, address, shared, sg):
+        update = False
+        port_obj = self.obj_get(name)
+        if port_obj:
+            update = True
+        else:
+            if name == 'auto':
+                id = str(uuid.uuid4())
+                port_obj = vnc_api.VirtualMachineInterface(name = id, 
+                        parent_obj = self.tenant)
+                port_obj.uuid = id
+            else:
+                port_obj = vnc_api.VirtualMachineInterface(name = name, 
+                        parent_obj = self.tenant)
+
+        if network:
+            self.add_network(port_obj, network)
+        if sg:
+            self.add_sg(port_obj, sg)
+
+        if update:
+            self.vnc.virtual_machine_interface_update(port_obj)
+        else:
+            self.vnc.virtual_machine_interface_create(port_obj)
+
+        if network:
+            self.add_ip(port_obj, address, network, shared)
 
         print port_obj.uuid
 
-    def delete(self, name, network, address):
+    def delete_address(self, obj, address):
+        for item in obj.get_instance_ip_back_refs():
+            ip_obj = self.vnc.instance_ip_read(id = item['uuid'])
+            if (ip_obj.get_instance_ip_address() == address):
+                self.vnc.instance_ip_delete(id = item['uuid'])
+                break
+
+    def delete_sg(self, obj, sg):
+        obj.set_security_group_list([])
+        '''
+        try:
+            sg_obj = self.vnc.security_group_read(
+                    fq_name = ['default-domain', self.tenant.name, sg])
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+            return
+        obj.del_security_group(sg_obj)
+        '''
+
+    def delete(self, name, network, address, sg):
         update = False
         obj = self.obj_get(name, msg = True)
         if not obj:
             return
         if address:
-            for item in obj.get_instance_ip_back_refs():
-                ip_obj = self.vnc.instance_ip_read(id = item['uuid'])
-                if (ip_obj.get_instance_ip_address() == address):
-                    self.vnc.instance_ip_delete(id = item['uuid'])
-                    break
+            self.delete_address(obj, address)
+            update = True
+        if sg:
+            self.delete_sg(obj, sg)
             update = True
 
-        if not update:
+        if update:
+            self.vnc.virtual_machine_interface_update(obj)
+        else:
             for item in obj.get_instance_ip_back_refs():
                 self.vnc.instance_ip_delete(id = item['uuid'])
             self.vnc.virtual_machine_interface_delete(id = obj.uuid)

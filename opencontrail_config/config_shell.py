@@ -224,6 +224,8 @@ class ConfigShell():
                 help = 'IP address')
         sub_parser.add_argument('--network', metavar = '<name>',
                 help = 'The name of virtual network')
+        sub_parser.add_argument('--security-group', metavar = '<name>',
+                help = 'The name of security group')
         sub_parser.add_argument('--shared', action = 'store_true',
                 help = 'Enable IP address sharing')
 
@@ -371,7 +373,8 @@ class ConfigShell():
                         args.interface_route_table, args.address,
                         args.floating_ip_pool, args.floating_ip)
             elif (args.obj_class == ConfigPort):
-                obj.add(args.name, args.network, args.address, args.shared)
+                obj.add(args.name, args.network, args.address, args.shared,
+                        args.security_group)
             elif (args.obj_class == ConfigBgpRouter):
                 obj.add(args.name, args.vendor, args.asn, args.address,
                         args.identifier, args.control)
@@ -413,7 +416,8 @@ class ConfigShell():
                            args.interface_route_table, args.address,
                            args.floating_ip)
             elif (args.obj_class == ConfigPort):
-                obj.delete(args.name, args.network, args.address)
+                obj.delete(args.name, args.network, args.address,
+                        args.security_group)
             elif (args.obj_class == ConfigBgpRouter):
                 obj.delete(args.name)
             elif (args.obj_class == ConfigGlobalVrouter):
