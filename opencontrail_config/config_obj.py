@@ -1561,11 +1561,12 @@ class ConfigBgpRouter(ConfigObject):
             identifier = None, control = None):
         if not identifier:
             identifier = address
+        af_list = ['route-target', 'inet-vpn', 'e-vpn', 'inet6-vpn','erm-vpn']
         if control:
-            af = vnc_api.AddressFamilies(['route-target', 'inet-vpn', 'e-vpn',
-                    'erm-vpn'])
+            af = vnc_api.AddressFamilies(af_list + ['erm-vpn'])
+            vendor = 'contrail'
         else:
-            af = vnc_api.AddressFamilies(['route-target', 'inet-vpn'])
+            af = vnc_api.AddressFamilies(af_list)
 
         ri = self.vnc.routing_instance_read(fq_name=['default-domain',
                 'default-project', 'ip-fabric', '__default__'])
