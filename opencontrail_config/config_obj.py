@@ -666,8 +666,8 @@ class ConfigNetwork(ConfigObject):
         rt_list = obj.get_route_target_list()
         if not rt_list:
             rt_list = vnc_api.RouteTargetList()
-            obj.set_route_target_list(rt_list)
         rt_list.add_route_target('target:%s' %(rt))
+        obj.set_route_target_list(rt_list)
 
     def route_target_del(self, obj, rt):
         rt_list = obj.get_route_target_list()
