@@ -303,6 +303,8 @@ class ConfigShell():
                 help = 'The identifier of BGP router')
         sub_parser.add_argument('--control', action = 'store_true',
                 help = 'BGP router is control node')
+        sub_parser.add_argument('--peer', action = 'append',
+                metavar = '<peer name>', help = 'BGP peer')
 
         sub_parser = subparsers.add_parser('vrouter',
                 help = 'vRouter')
@@ -377,7 +379,7 @@ class ConfigShell():
                         args.security_group)
             elif (args.obj_class == ConfigBgpRouter):
                 obj.add(args.name, args.vendor, args.asn, args.address,
-                        args.identifier, args.control)
+                        args.identifier, args.control, args.peer)
             elif (args.obj_class == ConfigGlobalVrouter):
                 obj.add(args.name, args.linklocal)
             elif (args.obj_class == ConfigVrouter):
@@ -419,7 +421,7 @@ class ConfigShell():
                 obj.delete(args.name, args.network, args.address,
                         args.security_group)
             elif (args.obj_class == ConfigBgpRouter):
-                obj.delete(args.name)
+                obj.delete(args.name, args.peer)
             elif (args.obj_class == ConfigGlobalVrouter):
                 obj.delete(args.name, args.linklocal)
             elif (args.obj_class == ConfigVrouter):

@@ -1599,9 +1599,10 @@ class ConfigVirtualDns():
 
 class ConfigBgpRouter(ConfigObject):
     def __init__(self, client):
+        self.parent_fq_name = ['default-domain', 'default-project',
+                'ip-fabric', '__default__']
         super(ConfigBgpRouter, self).__init__(client,
-                ['default-domain', 'default-project', 'ip-fabric',
-                '__default__',],
+                self.parent_fq_name,
                 client.vnc.bgp_router_read,
                 client.vnc.bgp_routers_list)
 
@@ -1611,7 +1612,7 @@ class ConfigBgpRouter(ConfigObject):
         if not ref_list:
             return
         for item in ref_list:
-            print '        %s' %(item['to'][4])
+            print '    %s' %(item['to'][4])
 
     def show_obj(self, obj):
         print '## BGP Router'
@@ -1626,60 +1627,72 @@ class ConfigBgpRouter(ConfigObject):
         print 'Hold Time: %s' %(prop.hold_time)
         print 'Address Families:'
         for item in prop.get_address_families().get_family():
-            print '        %s' %(item)
+            print '    %s' %(item)
         self.show_ref_bgp_router(obj)
 
     def add(self, name, vendor = None, asn = None, address = None,
-            identifier = None, control = None):
+            identifier = None, control = None, peer_list = None):
         if not identifier:
             identifier = address
-        af_list = ['route-target', 'inet-vpn', 'e-vpn', 'inet6-vpn','erm-vpn']
+        af_list = ['route-target', 'inet-vpn', 'e-vpn', 'inet6-vpn']
         if control:
             af = vnc_api.AddressFamilies(af_list + ['erm-vpn'])
             vendor = 'contrail'
         else:
             af = vnc_api.AddressFamilies(af_list)
 
-        ri = self.vnc.routing_instance_read(fq_name=['default-domain',
-                'default-project', 'ip-fabric', '__default__'])
-        params = vnc_api.BgpRouterParams(vendor = vendor,
-                autonomous_system = int(asn), identifier = identifier,
-                address = address, port = 179, address_families = af)
-        obj = vnc_api.BgpRouter(name, ri, bgp_router_parameters = params)
-
-        try:
-            id = self.vnc.bgp_router_create(obj)
-        except Exception as e:
-            print 'ERROR: %s' %(str(e))
-            return
-
-        obj = self.vnc.bgp_router_read(id = id)
-
         sess_attr_list = [vnc_api.BgpSessionAttributes(address_families = af)]
         sess_list = [vnc_api.BgpSession(attributes = sess_attr_list)]
-        peering_attrs = vnc_api.BgpPeeringAttributes(session = sess_list)
+        peer_attrs = vnc_api.BgpPeeringAttributes(session = sess_list)
 
-        peer_list = self.vnc.bgp_routers_list()['bgp-routers']
-        peer_id_list = []
-        for peer in peer_list:
-            peer_id_list.append(peer['uuid'])
+        obj = self.obj_get(name)
+        if obj:
+            update = True
+            params = obj.get_bgp_router_parameters()
+        else:
+            update = False
+            ri = self.vnc.routing_instance_read(fq_name = self.parent_fq_name)
+            obj = vnc_api.BgpRouter(name, ri)
+            params = vnc_api.BgpRouterParams(vendor = vendor, port = 179,
+                    address_families = af)
 
-        peer_obj_list = []
-        for item in peer_id_list:
-            peer_obj_list.append(self.vnc.bgp_router_read(id = item))
+        if asn:
+            params.autonomous_system = int(asn)
+        if address:
+            params.address = address
+            params.identifier = address
+        obj.set_bgp_router_parameters(params)
+        if peer_list:
+            for item in peer_list:
+                peer_obj = self.vnc.bgp_router_read(
+                        fq_name = self.parent_fq_name + [item])
+                obj.add_bgp_router(peer_obj, peer_attrs)
 
-        for item in peer_obj_list:
-            if (item.uuid == id):
-                continue
-            obj.add_bgp_router(item, peering_attrs)
+        if update:
+            self.vnc.bgp_router_update(obj)
+        else:
+            try:
+                id = self.vnc.bgp_router_create(obj)
+            except Exception as e:
+                print 'ERROR: %s' %(str(e))
+                return
 
-        self.vnc.bgp_router_update(obj)
-
-    def delete(self, name):
+    def delete(self, name, peer_list):
         obj = self.obj_get(name, msg = True)
         if not obj:
             return
-        self.vnc.bgp_router_delete(id = obj.uuid)
+        update = False
+        if peer_list:
+            update = True
+            for item in peer_list:
+                peer_obj = self.vnc.bgp_router_read(
+                        fq_name = self.parent_fq_name + [item])
+                obj.del_bgp_router(peer_obj)
+
+        if update:
+            self.vnc.bgp_router_update(obj)
+        else:
+            self.vnc.bgp_router_delete(id = obj.uuid)
 
 
 class ConfigGlobalVrouter(ConfigObject):
