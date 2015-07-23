@@ -311,11 +311,11 @@ class ConfigPolicy(ConfigObject):
                             start_port = int(s_e[0]), end_port = int(s_e[1])))
             elif (arg_name == 'dst-port'):
                 if (arg_val == 'any'):
-                    src_port_list.append(vnc_api.PortType(
+                    dst_port_list.append(vnc_api.PortType(
                             start_port = -1, end_port = -1))
                 else:
                     s_e = arg_val.split(':')
-                    src_port_list.append(vnc_api.PortType(
+                    dst_port_list.append(vnc_api.PortType(
                             start_port = int(s_e[0]), end_port = int(s_e[1])))
             elif (arg_name == 'action'):
                 action = arg_val
@@ -1292,8 +1292,10 @@ class ConfigPort(ConfigObject):
         if update:
             self.vnc.virtual_machine_interface_update(obj)
         else:
-            for item in obj.get_instance_ip_back_refs():
-                self.vnc.instance_ip_delete(id = item['uuid'])
+            ip_list = obj.get_instance_ip_back_refs()
+            if ip_list:
+                for item in ip_list:
+                    self.vnc.instance_ip_delete(id = item['uuid'])
             self.vnc.virtual_machine_interface_delete(id = obj.uuid)
 
 
