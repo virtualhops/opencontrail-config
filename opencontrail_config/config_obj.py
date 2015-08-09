@@ -1742,13 +1742,17 @@ class ConfigGlobalVrouter(ConfigObject):
         obj.set_linklocal_services(linklocal)
 
     def add(self, name, linklocal):
-        update = False
+        update = True
         obj = self.obj_get('default-global-vrouter-config')
+        if not obj:
+            obj = vnc_api.GlobalVrouterConfig()
+            update = False
         if linklocal:
             self.add_linklocal(obj, linklocal)
-            update = True
         if update:
             self.vnc.global_vrouter_config_update(obj)
+        else:
+            self.vnc.global_vrouter_config_create(obj)
 
     def delete_linklocal(self, obj, args_list):
         linklocal = obj.get_linklocal_services()

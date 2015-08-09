@@ -20,8 +20,8 @@ class ConfigShell():
         else:
             self.parser.print_help()
 
-    def add_common_args(self, sub_parser):
-        sub_parser.add_argument('name', nargs = '?', default = None,
+    def add_common_args(self, sub_parser, default_name = None):
+        sub_parser.add_argument('name', nargs = '?', default = default_name,
                 metavar = '<name>', help = 'The name')
         sub_parser.add_argument('--format',
                 choices = ['default', 'json', 'dict'],
@@ -318,7 +318,8 @@ class ConfigShell():
                 help = 'Global vRouter')
         sub_parser.set_defaults(obj_class = ConfigGlobalVrouter,
                 obj_parser = sub_parser)
-        self.add_common_args(sub_parser)
+        self.add_common_args(sub_parser,
+                default_name = 'default-global-vrouter-config')
         sub_parser.add_argument('--linklocal', action = 'append',
                 metavar = '<arguments>',
                 help = 'name=<name>,linklocal-address=<address>:<port>,' \
