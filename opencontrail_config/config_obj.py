@@ -1709,7 +1709,8 @@ class ConfigGlobalVrouter(ConfigObject):
         print 'Name: %s' %(obj.get_fq_name())
         print 'UUID: %s' %(obj.uuid)
         print 'Linklocal Service:'
-        for item in obj.get_linklocal_services().get_linklocal_service_entry():
+        linklocal = obj.get_linklocal_services()
+        for item in linklocal.get_linklocal_service_entry():
             print '  %s  %s:%s  %s:%s' %(item.get_linklocal_service_name(),
                     item.get_linklocal_service_ip(),
                     item.get_linklocal_service_port(),
@@ -1737,7 +1738,7 @@ class ConfigGlobalVrouter(ConfigObject):
                     linklocal_service_name = name,
                     linklocal_service_ip = linklocal_addr,
                     linklocal_service_port = int(linklocal_port),
-                    ip_fabric_service_ip = fabric_addr,
+                    ip_fabric_service_ip = [fabric_addr],
                     ip_fabric_service_port = int(fabric_port)))
         obj.set_linklocal_services(linklocal)
 
