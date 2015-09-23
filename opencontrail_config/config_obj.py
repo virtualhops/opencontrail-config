@@ -1171,7 +1171,7 @@ class ConfigPort(ConfigObject):
         if not ref_list:
             return
         for item in ref_list:
-            ip_obj = self.vnc.instance_ip_read(id = item['to'][0])
+            ip_obj = self.vnc.instance_ip_read(fq_name = [item['to'][0]])
             print '    %s' %(ip_obj.get_instance_ip_address())
 
     def show_back_ref_fip(self, obj):
