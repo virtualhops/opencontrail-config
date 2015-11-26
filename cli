@@ -1,0 +1,186 @@
+#!/usr/bin/python
+
+import sys
+import readline
+import cmd2
+import json
+from vnc_api import vnc_api
+
+config_env = {
+    'auth-username' : 'admin',
+    'auth-password' : 'contrail123',
+    'auth-tenant' : 'admin',
+    'auth-region' : 'RegionOne',
+    'auth-server' : '127.0.0.1',
+    'api-server' : '127.0.0.1',
+    'tenant' : 'demo',
+    'format' : 'json'}
+
+res_dict = {
+    'access-control-list' : 'AccessControlList',
+    'analytics-node' : 'AnalyticsNode',
+    'bgp-router' : 'BgpRouter',
+    'config-node' : 'ConfigNode',
+    'config-root' : 'ConfigRoot',
+    'customer-attachment' : 'CustomerAttachment',
+    'database-node' : 'DatabaseNode',
+    'domain' : 'Domain',
+    'floating-ip' : 'FloatingIp',
+    'floating-ip-pool' : 'FloatingIpPool',
+    'global-system-config' : 'GlobalSystemConfig',
+    'global-vrouter-config' : 'GlobalVrouterConfig',
+    'instance-ip' : 'InstanceIp',
+    'interface-route-table' : 'InterfaceRouteTable',
+    'loadbalancer-health-monitor' : 'LoadbalancerHealthmonitor',
+    'loadbalancer-member' : 'LoadbalancerMember',
+    'loadbalancer-pool' : 'LoadbalancerPool',
+    'logical-interface' : 'LogicalInterface',
+    'logical-router' : 'LogicalRouter',
+    'namespace' : 'Namespace',
+    'network-ipam' : 'NetworkIpam',
+    'network-policy' : 'NetworkPolicy',
+    'physical-interface' : 'PhysicalInterface',
+    'physical-router' : 'PhysicalRouter',
+    'project' : 'Project',
+    'provider-attachment' : 'ProviderAttachment',
+    'qos-forwarding-class' : 'QosForwardingClass',
+    'qos-queue' : 'QosQueue',
+    'route-table' : 'RouteTable',
+    'route-target' : 'RouteTarget',
+    'routing-instance' : 'RoutingInstance',
+    'security-group' : 'SecurityGroup',
+    'sevice-appliance' : 'ServiceAppliance',
+    'service-appliance-set' : 'ServiceApplianceSet',
+    'service-instance' : 'ServiceInstance',
+    'service-template' : 'ServiceTemplate',
+    'subnet' : 'Subnet',
+    'virtual-dns' : 'VirtualDns',
+    'virtual-dns-record' : 'VirtualDnsRecord',
+    'virtual-ip' : 'VirtualIp',
+    'virtual-machine-interface' : 'VirtualMachineInterface',
+    'virtual-machine' : 'VirtualMachine',
+    'virtual-network' : 'VirtualNetwork',
+    'virtual-router' : 'VirtualRouter'}
+
+
+class Config(cmd2.Cmd):
+    def __init__(self):
+        cmd2.Cmd.__init__(self)
+        readline.set_completer_delims(' ')
+        self.vnc = vnc_api.VncApi(
+                username = config_env['auth-username'],
+                password = config_env['auth-password'],
+                tenant_name = config_env['auth-tenant'],
+                api_server_host = config_env['api-server'],
+                auth_host = config_env['auth-server'])
+
+        try:
+            self.tenant = self.vnc.project_read(
+                    fq_name = ['default-domain', config_env['tenant']])
+            self.prompt = '%s# ' %(self.tenant.name)
+        except:
+            self.tenant = None
+            self.prompt = '/# '
+        self.edit = False
+        self.obj_edit = None
+
+    def do_env(self, args):
+        if not args:
+            return
+        arg_list = args.split(' ')
+        if not config_env.has_key(arg_list[0]):
+            print 'ERROR: No env %s!' %(arg_list[0])
+            return
+        config_env[arg_list[0]] = arg_list[1]
+
+    def do_tenant(self, name):
+        if name == '/':
+            self.tenant = None
+            self.prompt = '/# '
+        else:
+            try:
+                self.tenant = self.vnc.project_read(
+                        fq_name = ['default-domain', name])
+                self.prompt = '%s# ' %(name)
+            except Exception as e:
+                print 'ERROR: %s' %(str(e))
+
+    def res_list_get(self, name):
+        func_name = name.replace('-', '_')+'s_list'
+        func = getattr(self.vnc, func_name)
+        res_list = func()[name + 's']
+        name_list = []                                        
+        for res in res_list:                                  
+            name_str = ''                                     
+            for i in res['fq_name']:                          
+                name_str += '%s:' %(i)                        
+            name_list.append(name_str.rstrip(':'))            
+        return name_list                                      
+                                                              
+    def show_res_list(self, name):                            
+        for res in self.res_list_get(name):                   
+            print res
+
+    def show_res_obj(self, res, name):                        
+        func_name = res.replace('-', '_')+'_read'             
+        func = getattr(self.vnc, func_name)                   
+        obj = func(fq_name = name.split(':'))                 
+        if config_env['format'] == 'dump':
+            obj.dump()
+        else:
+            print json.dumps(obj, default = self.vnc._obj_serializer_all,
+                    indent=4, separators=(',', ': '))
+                                                              
+    def show_op(self, args):                                  
+        arg_list = args.split(' ')                            
+        if len(arg_list) == 1:                                
+            self.show_res_list(arg_list[0])                   
+        elif len(arg_list) == 2:                              
+            self.show_res_obj(arg_list[0], arg_list[1])       
+        else:                                                 
+            print 'ERROR: too many arguments!'                 
+                                                              
+    def show_edit(self, args):                                
+        print json.dumps(self.obj_edit,                       
+                default = self.vnc._obj_serializer_all,       
+                indent=4, separators=(',', ': '))             
+                                                              
+    def do_show(self, args):                                  
+        if self.edit:                                         
+            self.show_edit(args)                              
+        else:
+            self.show_op(args)
+
+    def complete_show(self, text, line, begidx, endidx):
+        #print 'complete: %s, %s, %s, %s' %(text, line, begidx, endidx)
+        arg_list = line.split(' ')
+        arg_count = len(arg_list) - 1
+        list_all = []
+        if arg_count == 0 or arg_count ==1:
+            list_all = res_dict.keys()
+        elif arg_count == 1 or arg_count == 2:
+            list_all = self.res_list_get(arg_list[1])
+        if not text:
+            completions = list_all
+        else:
+            completions = [ i for i in list_all if i.startswith(text) ]
+        return completions
+
+    def do_edit(self, name):
+        if not res_dict.has_key(name):
+            print 'ERROR: Resource %s does not exist!' %(name)
+            return
+        obj_class = getattr(vnc_api, res_dict[name])
+        self.obj_edit = obj_class()
+        self.prompt = 'edit %s# ' %(name)
+        self.edit = True
+
+    def do_set(self, args):
+        if not self.edit:
+            return
+
+
+                                                              
+if __name__ == '__main__':                                    
+    Config().cmdloop()
+
