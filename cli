@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import sys
+import uuid
 import readline
 import cmd2
 import json
@@ -83,6 +84,7 @@ class Config(cmd2.Cmd):
             self.prompt = '/# '
         self.edit = False
         self.obj_edit = None
+        self.update = False
 
     def do_env(self, args):
         if not args:
@@ -93,17 +95,25 @@ class Config(cmd2.Cmd):
             return
         config_env[arg_list[0]] = arg_list[1]
 
+    def prompt_op(self):
+        if self.tenant:
+            self.prompt = '%s# ' %(self.tenant.name)
+        else:
+            self.prompt = '/# '
+
+    def prompt_edit(self, name = None):
+        self.prompt = 'edit# '
+
     def do_tenant(self, name):
         if name == '/':
             self.tenant = None
-            self.prompt = '/# '
         else:
             try:
                 self.tenant = self.vnc.project_read(
                         fq_name = ['default-domain', name])
-                self.prompt = '%s# ' %(name)
             except Exception as e:
                 print 'ERROR: %s' %(str(e))
+        self.prompt_op()
 
     def res_list_get(self, name):
         func_name = name.replace('-', '_')+'s_list'
@@ -116,15 +126,19 @@ class Config(cmd2.Cmd):
                 name_str += '%s:' %(i)                        
             name_list.append(name_str.rstrip(':'))            
         return name_list                                      
-                                                              
+
+    def res_obj_get(self, res, name):
+        func_name = res.replace('-', '_')+'_read'             
+        func = getattr(self.vnc, func_name)                   
+        obj = func(fq_name = name.split(':'))                 
+        return obj
+
     def show_res_list(self, name):                            
         for res in self.res_list_get(name):                   
             print res
 
     def show_res_obj(self, res, name):                        
-        func_name = res.replace('-', '_')+'_read'             
-        func = getattr(self.vnc, func_name)                   
-        obj = func(fq_name = name.split(':'))                 
+        obj = self.res_obj_get(res, name)
         if config_env['format'] == 'dump':
             obj.dump()
         else:
@@ -141,9 +155,12 @@ class Config(cmd2.Cmd):
             print 'ERROR: too many arguments!'                 
                                                               
     def show_edit(self, args):                                
-        print json.dumps(self.obj_edit,                       
-                default = self.vnc._obj_serializer_all,       
-                indent=4, separators=(',', ': '))             
+        if config_env['format'] == 'dump':
+            self.obj_edit.dump()
+        else:
+            print json.dumps(self.obj_edit,                       
+                    default = self.vnc._obj_serializer_all,       
+                    indent=4, separators=(',', ': '))             
                                                               
     def do_show(self, args):                                  
         if self.edit:                                         
@@ -151,14 +168,14 @@ class Config(cmd2.Cmd):
         else:
             self.show_op(args)
 
-    def complete_show(self, text, line, begidx, endidx):
+    def complete_res_name(self, text, line):
         #print 'complete: %s, %s, %s, %s' %(text, line, begidx, endidx)
         arg_list = line.split(' ')
         arg_count = len(arg_list) - 1
         list_all = []
-        if arg_count == 0 or arg_count ==1:
+        if arg_count ==1:
             list_all = res_dict.keys()
-        elif arg_count == 1 or arg_count == 2:
+        elif arg_count == 2:
             list_all = self.res_list_get(arg_list[1])
         if not text:
             completions = list_all
@@ -166,18 +183,68 @@ class Config(cmd2.Cmd):
             completions = [ i for i in list_all if i.startswith(text) ]
         return completions
 
-    def do_edit(self, name):
-        if not res_dict.has_key(name):
-            print 'ERROR: Resource %s does not exist!' %(name)
+    def complete_show(self, text, line, begidx, endidx):
+        return self.complete_res_name(text, line)
+
+    def do_edit(self, args):
+        if self.edit:
+            print 'Already in edit mode.'
             return
-        obj_class = getattr(vnc_api, res_dict[name])
-        self.obj_edit = obj_class()
-        self.prompt = 'edit %s# ' %(name)
+        arg_list = args.split(' ')
+        if not res_dict.has_key(arg_list[0]):
+            print 'ERROR: Resource %s does not exist!' %(arg_list[0])
+            return
+        if len(arg_list) > 1:
+            try:
+                self.obj_edit = self.res_obj_get(arg_list[0], arg_list[1])
+                self.update = True
+            except:
+                obj_class = getattr(vnc_api, res_dict[arg_list[0]])
+                if arg_list[1] == 'uuid':
+                    uuid_str = str(uuid.uuid4())
+                    self.obj_edit = obj_class(name = uuid_str)
+                    self.obj_edit.uuid = uuid_str
+                else:
+                    self.obj_edit = obj_class(name = arg_list[1])
+                self.update = False
         self.edit = True
+        self.prompt_edit()
+
+    def complete_edit(self, text, line, begidx, endidx):
+        return self.complete_res_name(text, line)
+
+    def do_commit(self, args):
+        if not args:
+            if self.update:
+                print 'Object is updated.'
+            else:
+                print 'Object is created.'
+        else:
+            if self.update:
+                print 'Object is not updated.'
+            else:
+                print 'Object is not created.'
+        self.edit = False
+        self.prompt_op()
+
+    def attr_list_get(self, obj):
+        attr_list = []
+        for i in dir(vn):
+            if i.startswith('set'):
+                attr_list.append(i.lstrip('set_'))
+        attr_list.append('fq_name')
+        return attr_list
 
     def do_set(self, args):
         if not self.edit:
             return
+        arg_list = args.split(' ')
+        obj_cur = self.obj_edit
+        for arg in arg_list:
+            attr_list = self.attr_list_get(obj_cur)
+            if not arg in attr_list:
+                print 'ERROR: Attribute %s does not exist!' %(arg)
+                return
 
 
                                                               
