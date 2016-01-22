@@ -1477,7 +1477,7 @@ class ConfigVmInterface():
             elif (arg_name == 'name'):
                 name = arg_val
             elif (arg_name == 'port'):
-                port = arg_val
+                port = int(arg_val)
         if not address:
             print 'ERROR: Address is not specified!'
             return
