@@ -1461,8 +1461,53 @@ class ConfigVmInterface():
         self.tenant.add_floating_ip_pool(pool_obj)
         self.vnc.project_update(self.tenant)
 
+    def add_mirror(self, obj, mirror):
+        direction = 'both'
+        address = None
+        name = None
+        port = 8099
+        ri = None
+        for arg in mirror.split(','):
+            arg_name = arg.split('=')[0]
+            arg_val = arg.split('=')[1]
+            if (arg_name == 'direction'):
+                direction = arg_val
+            elif (arg_name == 'address'):
+                address = arg_val
+            elif (arg_name == 'name'):
+                name = arg_val
+            elif (arg_name == 'port'):
+                port = arg_val
+        if not address:
+            print 'ERROR: Address is not specified!'
+            return
+        for item in self.vnc.instance_ips_list()['instance-ips']:
+            iip = self.vnc.instance_ip_read(id = item['uuid'])
+            if (iip.instance_ip_address == address):
+                vn_name = iip.get_virtual_network_refs()[0]['to']
+                if (vn_name[1] == self.tenant.name):
+                    ri = vn_name
+                    ri.append(ri[2])
+                    break
+        else:
+            print 'ERROR: Faild to find VN by address!'
+            return
+        prop = obj.get_virtual_machine_interface_properties()
+        if not prop:
+            prop = vnc_api.VirtualMachineInterfacePropertiesType()
+        mirror_action = vnc_api.MirrorActionType()
+        mirror_action.analyzer_ip_address = address
+        mirror_action.analyzer_name = name
+        mirror_action.routing_instance = ri
+        mirror_action.udp_port = port
+        mirror_type = vnc_api.InterfaceMirrorType()
+        mirror_type.set_traffic_direction(direction)
+        mirror_type.set_mirror_to(mirror_action)
+        prop.set_interface_mirror(mirror_type)
+        obj.set_virtual_machine_interface_properties(prop)
+
     def add(self, name, sg = None, irt = None, addr = None,
-            fip_pool = None, fip = None):
+            fip_pool = None, fip = None, mirror = None):
         update = False
         obj = self.obj_get(name)
         if not obj:
@@ -1479,6 +1524,9 @@ class ConfigVmInterface():
             update = True
         if fip and fip_pool:
             self.add_fip(obj, fip_pool, fip)
+            update = True
+        if mirror:
+            self.add_mirror(obj, mirror)
             update = True
         if update:
             self.vnc.virtual_machine_interface_update(obj)
@@ -1522,7 +1570,7 @@ class ConfigVmInterface():
             ip = self.vnc.floating_ip_delete(id = item['uuid'])
 
     def delete(self, name, sg = None, irt = None, addr = None,
-            fip = None, vm_id = None):
+            fip = None, mirror = None, vm_id = None):
         update = False
         obj = self.obj_get(name, vm_id)
         if not obj:

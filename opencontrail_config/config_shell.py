@@ -214,6 +214,36 @@ class ConfigShell():
                 metavar = '<pool>',
                 help = 'The floating IP pool to allocate a floating IP from ' \
                        '<tenant>:<network>:<floating IP pool>')
+        sub_parser.add_argument('--mirror', metavar = '<arguments>',
+                help = 'Mirror ' \
+                       'direction=[ "both" | "ingress" | "egress" ],' \
+                       'address=<analyzer IP address>,' \
+                       'name=<analyzer name>,' \
+                       'port=<UDP port>')
+
+        sub_parser = subparsers.add_parser('vmi',
+                help = 'Virtual Machine Interface')
+        sub_parser.set_defaults(obj_class = ConfigVmInterface,
+                obj_parser = sub_parser)
+        self.add_common_args(sub_parser)
+        sub_parser.add_argument('--interface-route-table', metavar = '<name>',
+                help = 'The name of interface route table')
+        sub_parser.add_argument('--security-group', metavar = '<name>',
+                help = 'The name of security group')
+        sub_parser.add_argument('--address', metavar = '<address>',
+                help = 'IP address')
+        sub_parser.add_argument('--floating-ip', metavar = '<address>',
+                help = 'Floating IP address [ any | <address> ]')
+        sub_parser.add_argument('--floating-ip-pool',
+                metavar = '<pool>',
+                help = 'The floating IP pool to allocate a floating IP from ' \
+                       '<tenant>:<network>:<floating IP pool>')
+        sub_parser.add_argument('--mirror', metavar = '<arguments>',
+                help = 'Mirror ' \
+                       'direction=[ "both" | "ingress" | "egress" ],' \
+                       'address=<analyzer IP address>,' \
+                       'name=<analyzer name>,' \
+                       'port=<UDP port>')
 
         sub_parser = subparsers.add_parser('port',
                 help = 'Port')
@@ -374,7 +404,7 @@ class ConfigShell():
             elif (args.obj_class == ConfigVmInterface):
                 obj.add(args.name, args.security_group,
                         args.interface_route_table, args.address,
-                        args.floating_ip_pool, args.floating_ip)
+                        args.floating_ip_pool, args.floating_ip, args.mirror)
             elif (args.obj_class == ConfigPort):
                 obj.add(args.name, args.network, args.address, args.shared,
                         args.security_group)
@@ -417,7 +447,7 @@ class ConfigShell():
             elif (args.obj_class == ConfigVmInterface):
                 obj.delete(args.name, args.security_group,
                            args.interface_route_table, args.address,
-                           args.floating_ip)
+                           args.floating_ip, args.mirror)
             elif (args.obj_class == ConfigPort):
                 obj.delete(args.name, args.network, args.address,
                         args.security_group)
