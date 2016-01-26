@@ -1556,14 +1556,17 @@ class ConfigVmInterface():
         obj.del_interface_route_table(table_obj)
 
     def delete_addr(self, obj, addr):
-        ip_list = obj.get_instance_ip_back_refs()
-        for ip in ip_list:
-            ip_obj = self.vnc.instance_ip_read(id = ip['uuid'])
-            if (ip_obj.get_instance_ip_address() == addr):
-                self.vnc.instance_ip_delete(id = ip_obj.uuid)
-                break
+        if len(addr.split('.')) > 1:
+            ip_list = obj.get_instance_ip_back_refs()
+            for ip in ip_list:
+                ip_obj = self.vnc.instance_ip_read(id = ip['uuid'])
+                if (ip_obj.get_instance_ip_address() == addr):
+                    self.vnc.instance_ip_delete(id = ip_obj.uuid)
+                    break
+            else:
+                print 'ERROR: IP address %s is not found!' %(addr)
         else:
-            print 'ERROR: IP address %s is not found!' %(addr)
+            self.vnc.instance_ip_delete(id = addr)
 
     def delete_fip(self, obj):
         list = obj.get_floating_ip_back_refs()
@@ -1590,7 +1593,7 @@ class ConfigVmInterface():
             update = True
         if addr:
             self.delete_addr(obj, addr)
-            update = True
+            return
         if fip:
             self.delete_fip(obj)
             update = True
