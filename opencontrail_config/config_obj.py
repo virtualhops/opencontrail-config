@@ -1596,6 +1596,8 @@ class ConfigVmInterface():
             update = True
         if update:
             self.vnc.virtual_machine_interface_update(obj)
+        else:
+            self.vnc.virtual_machine_interface_delete(id = obj.uuid)
 
 
 class ConfigVirtualDns():
