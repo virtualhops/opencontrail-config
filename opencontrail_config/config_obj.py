@@ -1405,7 +1405,10 @@ class ConfigVmInterface():
 
     def show(self, args):
         if args.name:
-            obj = self.obj_get(args.name)
+            if len(args.name.split(':')) > 1:
+                obj = self.obj_get(args.name)
+            else:
+                obj = self.vnc.virtual_machine_interface_read(id = args.name)
             if not obj:
                 print 'ERROR: Object %s is not found!' %(args.name)
                 return
@@ -1572,7 +1575,10 @@ class ConfigVmInterface():
     def delete(self, name, sg = None, irt = None, addr = None,
             fip = None, mirror = None, vm_id = None):
         update = False
-        obj = self.obj_get(name, vm_id)
+        if len(name.split(':')) > 1:
+            obj = self.obj_get(name, vm_id)
+        else:
+            obj = self.vnc.virtual_machine_interface_read(id = name)
         if not obj:
             print 'ERROR: Object %s is not found!' %(name)
             return
