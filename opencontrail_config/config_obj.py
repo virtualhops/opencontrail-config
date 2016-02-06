@@ -627,11 +627,17 @@ class ConfigNetwork(ConfigObject):
             for item in ipam_list:
                 if item['to'] == ipam_obj.get_fq_name():
                     subnet_list = item['attr'].get_ipam_subnets()
-                    obj.del_network_ipam(ref_obj = ipam_obj)   
                     break
         subnet_list.append(ipam_subnet)
         obj.add_network_ipam(ref_obj = ipam_obj,    
                 ref_data = vnc_api.VnSubnetsType(subnet_list))
+
+        obj_list = []
+        attr_list = []
+        for item in obj.get_network_ipam_refs():
+            obj_list.append(item['to'])
+            attr_list.append(item['attr'])
+        obj.set_network_ipam_list(obj_list, attr_list)
 
     def ipam_del(self, obj, name):
         try:
