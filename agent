@@ -1,0 +1,400 @@
+#!/usr/bin/python
+
+import sys
+import uuid
+import argparse
+import subprocess
+from vnc_api import vnc_api
+from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
+
+
+agent_default = {
+    'api-server' : '10.84.29.96',
+    'tenant' : 'admin'}
+
+
+class AgentNamespace(object):
+    def __init__(self):
+        pass
+
+
+class AgentFloatingIp(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        for fip in self.vnc.floating_ips_list()['floating-ips']:
+            obj = self.vnc.floating_ip_read(id = fip['uuid'])
+            vmi_list = obj.get_virtual_machine_interface_refs()
+            if vmi_list:
+                print '%-16s    %-16s    %s' %(obj.get_floating_ip_address(),
+                       obj.get_floating_ip_fixed_ip_address(),
+                       vm_list[0]['uuid'])
+            else:
+                print '%s' %(obj.get_floating_ip_address())
+
+    def get_pool(self, name):
+        pool_name = ['default-domain'] + name.split(':')
+        pool = None
+        try:
+            pool = self.vnc.floating_ip_pool_read(fq_name = pool_name)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+        return pool
+
+    def get_fip_by_address(self, address):
+        for fip in self.vnc.floating_ips_list()['floating-ips']:
+            obj = self.vnc.floating_ip_read(id = fip['uuid'])
+            if (obj.get_floating_ip_address() == address):
+                return obj
+        else:
+            print 'ERROR: Floating ip %s is not found!' %(args.name)
+
+    def get_port(self, name, tenant):
+        if ':' in name:
+            vm = self.vnc.virtual_machine_read(fq_name = [name.split(':')[0]])
+            for item in vm.get_virtual_machine_interface_back_refs():
+                vmi = self.vnc.virtual_machine_interface_read(
+                        id = item['uuid'])
+                vn_name = vmi.get_virtual_network_refs()[0]['to']
+                if (vn_name[1] == tenant) and \
+                        (vn_name[2] == name.split(':')[1]):
+                    break
+            else:
+                print 'ERROR: Port %s is not found!' %(args.port)
+                return
+        else:
+            vmi = self.vnc.virtual_machine_interface_read(id = name)
+        return vmi
+
+    def allocate(self, args):
+        pool = self.get_pool(args.pool)
+        if not pool:
+            return
+        id = str(uuid.uuid4())
+        fip = vnc_api.FloatingIp(name = id, parent_obj = pool)
+        fip.uuid = id
+        tenant = self.vnc.project_read(
+                fq_name = ['default-domain', args.tenant])
+        fip.add_project(tenant)
+        self.vnc.floating_ip_create(fip)
+        fip = self.vnc.floating_ip_read(id = fip.uuid)
+        print fip.get_floating_ip_address()
+
+    def release(self, args):
+        obj = self.get_fip_by_address(args.name)
+        if not obj:
+            return
+        self.vnc.floating_ip_delete(id = obj.uuid)
+
+    def attach(self, args):
+        vmi = self.get_port(args.port, args.tenant)
+        if not vmi:
+            return
+        fip = self.get_fip_by_address(args.name)
+        if not fip:
+            return
+        fip.add_virtual_machine_interface(vmi)
+        if args.address:
+            fip.set_floating_ip_fixed_ip_address(args.address)
+        self.vnc.floating_ip_update(fip)
+
+    def detach(self, args):
+        vmi = self.get_port(args.port, args.tenant)
+        if not vmi:
+            return
+        fip = self.get_fip_by_address(args.name)
+        if not fip:
+            return
+        fip.del_virtual_machine_interface(vmi)
+        self.vnc.floating_ip_update(fip)
+
+
+class AgentVmi(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        l = self.vnc.virtual_machine_interfaces_list()
+        for item in l['virtual-machine-interfaces']:
+            vmi = self.vnc.virtual_machine_interface_read(id = item['uuid'])
+            print vmi.get_fq_name()
+            mac = vmi.get_virtual_machine_interface_mac_addresses()
+            print '  MAC: %s' %(mac.get_mac_address()[0])
+            ip_list = vmi.get_instance_ip_back_refs()
+            if ip_list:
+                ip_str = ''
+                for ip in ip_list:
+                    ip = self.vnc.instance_ip_read(id = ip['uuid'])
+                    ip_str += ' %s' %(ip.get_instance_ip_address())
+                print '  IP:%s' %(ip_str)
+            print ''
+
+    def ip_add(self, vmi, vn, subnet):
+        # IP address
+        id = str(uuid.uuid4())
+        ip = vnc_api.InstanceIp(name = id)
+        ip.uuid = id
+        ip.add_virtual_machine_interface(vmi)
+        ip.add_virtual_network(vn)
+        if subnet:
+            prefix = subnet.split('/')[0]
+            length = subnet.split('/')[1]
+            l = vn.get_network_ipam_refs()[0]['attr'].get_ipam_subnets()
+            for subnet in l:
+                if (subnet.get_subnet().ip_prefix == prefix) and \
+                        (subnet.get_subnet().ip_prefix_len == int(length)):
+                    ip.subnet_uuid = subnet.subnet_uuid
+                    break
+        self.vnc.instance_ip_create(ip)
+
+    def add(self, args):
+        tenant = self.vnc.project_read(
+                fq_name = ['default-domain', args.tenant])
+        if (args.name == 'id'):
+            id = str(uuid.uuid4())
+            vmi = vnc_api.VirtualMachineInterface(name = id,
+                    parent_obj = tenant)
+            vmi.uuid = id
+        else:
+            vmi = vnc_api.VirtualMachineInterface(name = args.name,
+                    parent_obj = tenant)
+
+        l = args.network.split(':')
+        network = l[0]
+        subnet_list = None
+        if len(l) > 1:
+            subnet_list = l[1:]
+        vn = self.vnc.virtual_network_read(
+                fq_name = ['default-domain', args.tenant, network])
+        vmi.set_virtual_network(vn)
+        self.vnc.virtual_machine_interface_create(vmi)
+        vmi = self.vnc.virtual_machine_interface_read(id = vmi.uuid)
+
+        if subnet_list:
+            for subnet in subnet_list:
+                self.ip_add(vmi, vn, subnet)
+        else:
+            self.ip_add(vmi, vn, None)
+        return vmi
+
+    def delete(self, args):
+        fq_name = ['default-domain', args.tenant, args.name]
+        try:
+            vmi = self.vnc.virtual_machine_interface_read(fq_name = fq_name)
+        except vnc_api.NoIdError:
+            print 'ERROR: VMI %s is not found!' %(fq_name)
+            return
+        ip_list = vmi.get_instance_ip_back_refs()
+        if ip_list:
+            for ip in ip_list:
+                self.vnc.instance_ip_delete(id = ip['uuid'])
+        try:
+            self.vnc.virtual_machine_interface_delete(fq_name = fq_name)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+
+
+class AgentVm(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        for vm in self.vnc.virtual_machines_list()['virtual-machines']:
+            print vm['fq_name']
+
+    def add(self, args):
+        # Virtual machine
+        try:
+            vm = self.vnc.virtual_machine_read(fq_name = [args.name])
+            print 'VM %s already exists.' %(args.name)
+            return None
+        except vnc_api.NoIdError:
+            pass
+        vm = vnc_api.VirtualMachine(args.name)
+        self.vnc.virtual_machine_create(vm)
+        vm = self.vnc.virtual_machine_read(id = vm.uuid)
+
+        # Virtual machine interface
+        agent_vmi = AgentVmi(self.vnc)
+        vmi_args = AgentNamespace()
+        vmi_args.name = 'id'
+        vmi_args.tenant = args.tenant
+        vmi_args.network = args.network
+        vmi = agent_vmi.add(vmi_args)
+
+        # TAP interface
+        mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
+        l = mac.split(':')
+        tap_name = 'tap' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
+        subprocess.check_output('sudo ip tuntap add %s mode tap' %(tap_name),
+                shell = True)
+        subprocess.check_output('sudo ip link set %s up' %(tap_name),
+                shell = True)
+
+        # Plug VMI
+        api = ContrailVRouterApi()
+        api.add_port(vm.uuid, vmi.uuid, tap_name, mac,
+                port_type = 'NovaVMPort')
+
+        print 'TAP: %s' %(tap_name)
+        print 'MAC: %s' %(mac)
+
+    def vmi_delete(self, vmi_uuid):
+        vmi = self.vnc.virtual_machine_interface_read(id = vmi_uuid)
+
+        # Unplug VMI
+        api = ContrailVRouterApi()
+        api.delete_port(vmi_uuid)
+
+        # Delete TAP interface
+        mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
+        l = mac.split(':')
+        tap_name = 'tap' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
+        subprocess.check_output('sudo ip link set %s down' %(tap_name),
+                shell = True)
+        subprocess.check_output('sudo ip link delete %s' %(tap_name),
+                shell = True)
+
+        # Delete IP address
+        ip_list = vmi.get_instance_ip_back_refs()
+        if ip_list:
+            for ip in ip_list:
+                self.vnc.instance_ip_delete(id = ip['uuid'])
+
+        self.vnc.virtual_machine_interface_delete(id = vmi_uuid)
+
+    def delete(self, args):
+        try:
+            vm = self.vnc.virtual_machine_read(fq_name = [args.name])
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+            return
+
+        vmi_list = vm.get_virtual_machine_interface_back_refs()
+        if vmi_list:
+            for vmi in vmi_list:
+                self.vmi_delete(vmi['uuid'])
+        self.vnc.virtual_machine_delete(id = vm.uuid)
+
+
+class Agent(object):
+
+    def __init__(self):
+        self.parser_init()
+
+    def connect(self, args):
+        vnc = vnc_api.VncApi(tenant_name = args.tenant,
+                api_server_host = args.api_server)
+        return vnc
+
+    def parser_init(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--api-server',
+                default = agent_default['api-server'],
+                help = 'API server IP address')
+        parser.add_argument('--tenant',
+                default = agent_default['tenant'],
+                help = 'Tenant name')
+
+        subparsers = parser.add_subparsers(metavar = '<command>')
+
+        sub_parser = subparsers.add_parser('help',
+                help = 'Print help messages.')
+        sub_parser.set_defaults(op = 'help')
+
+        #### Floating IP
+        sub_parser = subparsers.add_parser('floating-ip-list',
+                help = 'List floating IPs.')
+        sub_parser.set_defaults(obj_class = AgentFloatingIp, op = 'list')
+
+        sub_parser = subparsers.add_parser('floating-ip-allocate',
+                help = 'Allocate a floating IP.')
+        sub_parser.set_defaults(obj_class = AgentFloatingIp, op = 'allocate')
+        sub_parser.add_argument('--pool', required = True,
+                metavar = '<tenant>:<network>:<pool>',
+                help='The name of floating IP pool')
+
+        sub_parser = subparsers.add_parser('floating-ip-release',
+                help = 'Release a floating IP.')
+        sub_parser.set_defaults(obj_class = AgentFloatingIp, op = 'release')
+        sub_parser.add_argument('name', metavar = '<IP address>',
+                help='The floating IP address')
+
+        sub_parser = subparsers.add_parser('floating-ip-attach',
+                help = 'Attach a floating IP to an IP.')
+        sub_parser.set_defaults(obj_class = AgentFloatingIp, op = 'attach')
+        sub_parser.add_argument('name', metavar = '<IP address>',
+                help='The floating IP address')
+        sub_parser.add_argument('--port', required = True,
+                metavar = '<UUID> | <VM>:<VN>',
+                help='The virtual machine interface')
+        sub_parser.add_argument('--address', metavar = '<IP address>',
+                help='The IP address that floating IP address is attached to')
+
+        sub_parser = subparsers.add_parser('floating-ip-detach',
+                help = 'Detach a floating IP from an IP.')
+        sub_parser.set_defaults(obj_class = AgentFloatingIp, op = 'detach')
+        sub_parser.add_argument('name', metavar = '<IP address>',
+                help='The floating IP address')
+        sub_parser.add_argument('--port', required = True,
+                metavar = '<UUID> | <VM>:<VN>',
+                help='The virtual machine interface')
+
+        #### VM
+        sub_parser = subparsers.add_parser('vm-add',
+                help = 'Add a virtual machine.')
+        sub_parser.set_defaults(obj_class = AgentVm, op = 'add')
+        sub_parser.add_argument('name', help='VM name')
+        sub_parser.add_argument('--network', required = True,
+                metavar = '<name>[:<subnet prefix>/<length>[...]]',
+                help='Virtual network name')
+
+        sub_parser = subparsers.add_parser('vm-delete',
+                help = 'Delete a virtual machine.')
+        sub_parser.set_defaults(obj_class = AgentVm, op = 'delete')
+        sub_parser.add_argument('name', help='VM name')
+
+        sub_parser = subparsers.add_parser('vm-list',
+                help = 'List virtual machines.')
+        sub_parser.set_defaults(obj_class = AgentVm, op = 'list')
+
+        sub_parser = subparsers.add_parser('vm-show',
+                help = 'Show a virtual machine.')
+        sub_parser.set_defaults(obj_class = AgentVm, op = 'show')
+        sub_parser.add_argument('name', help='VM name')
+
+        #### VMI
+        sub_parser = subparsers.add_parser('vmi-add',
+                help = 'Add a virtual machine interface.')
+        sub_parser.set_defaults(obj_class = AgentVmi, op = 'add')
+        sub_parser.add_argument('name', metavar = '<name> | id',
+                help='VMI name')
+        sub_parser.add_argument('--network', required = True,
+                metavar = '<name>[:<subnet prefix>/<length>[...]]',
+                help='Virtual network name')
+
+        sub_parser = subparsers.add_parser('vmi-delete',
+                help = 'Delete a virtual machine interface.')
+        sub_parser.set_defaults(obj_class = AgentVmi, op = 'delete')
+        sub_parser.add_argument('name', metavar = '<name> | id',
+                help='VMI name')
+
+        sub_parser = subparsers.add_parser('vmi-list',
+                help = 'List virtual machine interfaces.')
+        sub_parser.set_defaults(obj_class = AgentVmi, op = 'list')
+
+        self.parser = parser
+
+    def main(self):
+        args = self.parser.parse_args()
+
+        vnc = self.connect(args)
+        obj = args.obj_class(vnc = vnc)
+        func = getattr(obj, args.op)
+        func(args)
+
+
+if __name__ == '__main__':                                    
+    Agent().main()
+
