@@ -5,17 +5,97 @@ import uuid
 import argparse
 import subprocess
 from vnc_api import vnc_api
-from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
 
 
 agent_default = {
-    'api-server' : '10.84.29.96',
-    'tenant' : 'admin'}
+    'api-server': '127.0.0.1',
+    'tenant': 'admin',
+    'auth-username': 'admin',
+    'auth-password': 'contrail123',
+    'auth-tenant': 'admin',
+    'auth-server': '127.0.0.1'}
 
 
-class AgentNamespace(object):
+def to_fq_name_str(fq_name_list):
+    fq_name_str = ''
+    for item in fq_name_list:
+        fq_name_str += '%s:' %(item)
+    return fq_name_str.rstrip(':')
+
+
+class AgentArgs(object):
     def __init__(self):
         pass
+
+
+class AgentTenant(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        for item in self.vnc.projects_list()['projects']:
+            print item['fq_name']
+
+    def add(self, args):
+        domain = self.vnc.domain_read(fq_name = ['default-domain'])
+        obj = vnc_api.Project(name = args.name, parent_obj = domain)
+        try:
+            self.vnc.project_create(obj)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+
+    def delete(self, args):
+        try:
+            self.vnc.project_delete(fq_name = ['default-domain', args.name])
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+
+
+class AgentInstanceIp(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        for item in self.vnc.instance_ips_list()['instance-ips']:
+            iip = self.vnc.instance_ip_read(id = item['uuid'])
+            name_str = to_fq_name_str(iip.fq_name)
+            print name_str
+            print '    Address: %s' %(iip.instance_ip_address)
+            name_str = to_fq_name_str(
+                    iip.get_virtual_network_refs()[0]['to'])
+            print '    Network: %s' %(name_str)
+            name_str = to_fq_name_str(
+                    iip.get_virtual_machine_interface_refs()[0]['to'])
+            print '    VMI:     %s' %(name_str)
+            print ''
+
+    def add(self, args):
+        pass
+
+
+class AgentIpam(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        for item in self.vnc.network_ipams_list()['network-ipams']:
+            print item['fq_name']
+
+    def add(self, args):
+        tenant = self.vnc.project_read(
+                fq_name = ['default-domain', args.tenant])
+        obj = vnc_api.NetworkIpam(name = args.name, parent_obj = tenant)
+        try:
+            self.vnc.network_ipam_create(obj)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+
+    def delete(self, args):
+        try:
+            self.vnc.network_ipam_delete(
+                    fq_name = ['default-domain', args.tenant, args.name])
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
 
 
 class AgentFloatingIp(object):
@@ -217,7 +297,7 @@ class AgentVm(object):
 
         # Virtual machine interface
         agent_vmi = AgentVmi(self.vnc)
-        vmi_args = AgentNamespace()
+        vmi_args = AgentArgs()
         vmi_args.name = 'id'
         vmi_args.tenant = args.tenant
         vmi_args.network = args.network
@@ -233,6 +313,7 @@ class AgentVm(object):
                 shell = True)
 
         # Plug VMI
+        from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
         api = ContrailVRouterApi()
         api.add_port(vm.uuid, vmi.uuid, tap_name, mac,
                 port_type = 'NovaVMPort')
@@ -244,6 +325,7 @@ class AgentVm(object):
         vmi = self.vnc.virtual_machine_interface_read(id = vmi_uuid)
 
         # Unplug VMI
+        from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
         api = ContrailVRouterApi()
         api.delete_port(vmi_uuid)
 
@@ -286,6 +368,9 @@ class Agent(object):
     def connect(self, args):
         vnc = vnc_api.VncApi(tenant_name = args.tenant,
                 api_server_host = args.api_server)
+        vnc = vnc_api.VncApi(username = args.auth_username,
+                password = args.auth_password, tenant_name = args.auth_tenant,
+                api_server_host = args.api_server, auth_host = args.auth_server)
         return vnc
 
     def parser_init(self):
@@ -296,6 +381,18 @@ class Agent(object):
         parser.add_argument('--tenant',
                 default = agent_default['tenant'],
                 help = 'Tenant name')
+        parser.add_argument('--auth-username',
+                default = agent_default['auth-username'],
+                help = 'Username for authentication')
+        parser.add_argument('--auth-password',
+                default = agent_default['auth-password'],
+                help = 'Password for authentication')
+        parser.add_argument('--auth-tenant',
+                default = agent_default['auth-tenant'],
+                help = 'Tenant for authentication')
+        parser.add_argument('--auth-server',
+                default = agent_default['auth-server'],
+                help = 'Authentication server')
 
         subparsers = parser.add_subparsers(metavar = '<command>')
 
@@ -340,6 +437,49 @@ class Agent(object):
         sub_parser.add_argument('--port', required = True,
                 metavar = '<UUID> | <VM>:<VN>',
                 help='The virtual machine interface')
+
+        #### Instance IP
+        sub_parser = subparsers.add_parser('instance-ip-add',
+                help = 'Add an instance IP.')
+        sub_parser.set_defaults(obj_class = AgentInstanceIp, op = 'add')
+
+        sub_parser = subparsers.add_parser('instance-ip-delete',
+                help = 'Delete an instance IP.')
+        sub_parser.set_defaults(obj_class = AgentInstanceIp, op = 'delete')
+
+        sub_parser = subparsers.add_parser('instance-ip-list',
+                help = 'List instance IPs.')
+        sub_parser.set_defaults(obj_class = AgentInstanceIp, op = 'list')
+
+        #### IPAM
+        sub_parser = subparsers.add_parser('ipam-add',
+                help = 'Add an IPAM.')
+        sub_parser.set_defaults(obj_class = AgentIpam, op = 'add')
+        sub_parser.add_argument('name', help='IPAM name')
+
+        sub_parser = subparsers.add_parser('ipam-delete',
+                help = 'Delete an IPAM.')
+        sub_parser.set_defaults(obj_class = AgentIpam, op = 'delete')
+        sub_parser.add_argument('name', help='IPAM name')
+
+        sub_parser = subparsers.add_parser('ipam-list',
+                help = 'List IPAMs.')
+        sub_parser.set_defaults(obj_class = AgentIpam, op = 'list')
+
+        #### Tenant
+        sub_parser = subparsers.add_parser('tenant-add',
+                help = 'Add a tenant/project.')
+        sub_parser.set_defaults(obj_class = AgentTenant, op = 'add')
+        sub_parser.add_argument('name', help='Tenant name')
+
+        sub_parser = subparsers.add_parser('tenant-delete',
+                help = 'Delete a tenant/project.')
+        sub_parser.set_defaults(obj_class = AgentTenant, op = 'delete')
+        sub_parser.add_argument('name', help='Tenant name')
+
+        sub_parser = subparsers.add_parser('tenant-list',
+                help = 'List tenants/projects.')
+        sub_parser.set_defaults(obj_class = AgentTenant, op = 'list')
 
         #### VM
         sub_parser = subparsers.add_parser('vm-add',
