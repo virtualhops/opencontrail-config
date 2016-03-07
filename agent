@@ -286,6 +286,26 @@ class AgentVm(object):
         for vm in self.vnc.virtual_machines_list()['virtual-machines']:
             print vm['fq_name']
 
+    def show(self, args):
+        vm = self.vnc.virtual_machine_read(fq_name = [args.name])
+        print vm.get_fq_name()
+        vmi_list = vm.get_virtual_machine_interface_back_refs()
+        if not vmi_list:
+            return
+        for item in vmi_list:
+            vmi = self.vnc.virtual_machine_interface_read(id = item['uuid'])
+            print 'VMI: %s' %(vmi.get_fq_name())
+            mac = vmi.get_virtual_machine_interface_mac_addresses()
+            print '    MAC: %s' %(mac.get_mac_address()[0])
+            ip_list = vmi.get_instance_ip_back_refs()
+            if ip_list:
+                ip_str = ''
+                for ip in ip_list:
+                    ip = self.vnc.instance_ip_read(id = ip['uuid'])
+                    ip_str += ' %s' %(ip.get_instance_ip_address())
+                print '    IP:%s' %(ip_str)
+            print ''
+
     def add(self, args):
         # Virtual machine
         try:
