@@ -8,12 +8,12 @@ from vnc_api import vnc_api
 
 
 agent_default = {
-    'api-server': '127.0.0.1',
+    'api-server': '10.84.29.96',
     'tenant': 'admin',
     'auth-username': 'admin',
     'auth-password': 'contrail123',
     'auth-tenant': 'admin',
-    'auth-server': '127.0.0.1'}
+    'auth-server': '10.84.29.96'}
 
 
 def to_fq_name_str(fq_name_list):
@@ -248,6 +248,9 @@ class AgentVmi(object):
         vn = self.vnc.virtual_network_read(
                 fq_name = ['default-domain', args.tenant, network])
         vmi.set_virtual_network(vn)
+        if hasattr(args, 'vm') and args.vm:
+            vm_obj = self.vnc.virtual_machine_read(id = args.vm)
+            vmi.add_virtual_machine(vm_obj)
         self.vnc.virtual_machine_interface_create(vmi)
         vmi = self.vnc.virtual_machine_interface_read(id = vmi.uuid)
 
@@ -301,6 +304,7 @@ class AgentVm(object):
         vmi_args.name = 'id'
         vmi_args.tenant = args.tenant
         vmi_args.network = args.network
+        vmi_args.vm = vm.uuid
         vmi = agent_vmi.add(vmi_args)
 
         # TAP interface
@@ -318,8 +322,8 @@ class AgentVm(object):
         api.add_port(vm.uuid, vmi.uuid, tap_name, mac,
                 port_type = 'NovaVMPort')
 
-        print 'TAP: %s' %(tap_name)
-        print 'MAC: %s' %(mac)
+        print '      <mac address="%s"/>' %(mac)
+        print '      <target dev="%s"/>' %(tap_name)
 
     def vmi_delete(self, vmi_uuid):
         vmi = self.vnc.virtual_machine_interface_read(id = vmi_uuid)
@@ -528,6 +532,8 @@ class Agent(object):
 
     def main(self):
         args = self.parser.parse_args()
+        if args.op == 'help':
+            return
 
         vnc = self.connect(args)
         obj = args.obj_class(vnc = vnc)
