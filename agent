@@ -109,7 +109,7 @@ class AgentFloatingIp(object):
             if vmi_list:
                 print '%-16s    %-16s    %s' %(obj.get_floating_ip_address(),
                        obj.get_floating_ip_fixed_ip_address(),
-                       vm_list[0]['uuid'])
+                       vmi_list[0]['uuid'])
             else:
                 print '%s' %(obj.get_floating_ip_address())
 
@@ -390,8 +390,6 @@ class Agent(object):
         self.parser_init()
 
     def connect(self, args):
-        vnc = vnc_api.VncApi(tenant_name = args.tenant,
-                api_server_host = args.api_server)
         vnc = vnc_api.VncApi(username = args.auth_username,
                 password = args.auth_password, tenant_name = args.auth_tenant,
                 api_server_host = args.api_server, auth_host = args.auth_server)
