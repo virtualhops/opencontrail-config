@@ -289,8 +289,7 @@ class ConfigPolicy(ConfigObject):
         action = None
         service_list = []
         for arg in arg_list:
-            arg_name = arg.split('=')[0]
-            arg_val = arg.split('=')[1]
+            arg_name, arg_val = arg.split('=')
             if (arg_name == 'direction'):
                 direction = arg_val
             elif (arg_name == 'protocol'):
@@ -395,8 +394,7 @@ class ConfigPolicy(ConfigObject):
                 return
             for rule_arg in rule_arg_list:
                 for arg in rule_arg.split(','):
-                    arg_name = arg.split('=')[0]
-                    arg_val = arg.split('=')[1]
+                    arg_name, arg_val = arg.split('=')
                     if (arg_name == 'index'):
                         rule = rules.get_policy_rule()[int(arg_val) - 1]
                         rules.delete_policy_rule(rule)
@@ -457,8 +455,7 @@ class ConfigSecurityGroup(ConfigObject):
         addr_list = []
         if address:
             for item in address:
-                prefix = item.split('/')[0]
-                len = item.split('/')[1]
+                prefix, len = item.split('/')
                 addr_list.append(vnc_api.AddressType(
                         subnet = vnc_api.SubnetType(
                         ip_prefix = prefix, ip_prefix_len = int(len))))
@@ -925,8 +922,7 @@ class ConfigServiceInstance(ConfigObject):
             net_auto = False
             tenant_name = self.tenant.name
             for arg in net.split(','):
-                arg_name = arg.split('=')[0]
-                arg_val = arg.split('=')[1]
+                arg_name, arg_val = arg.split('=')
                 if (arg_name == 'tenant'):
                     tenant_name = arg_val
                 elif (arg_name == 'network'):
@@ -1002,8 +998,7 @@ class ConfigRouteTable(ConfigObject):
             routes = vnc_api.RouteTableType()
             obj.set_routes(routes)
         for arg in route_args.split(','):
-            arg_name = arg.split('=')[0]
-            arg_val = arg.split('=')[1]
+            arg_name, arg_val = arg.split('=')
             if (arg_name == 'prefix'):
                 prefix = arg_val
             elif (arg_name == 'next-hop'):
@@ -1032,8 +1027,7 @@ class ConfigRouteTable(ConfigObject):
         if not routes:
             return
         for arg in route_args.split(','):
-            arg_name = arg.split('=')[0]
-            arg_val = arg.split('=')[1]
+            arg_name, arg_val = arg.split('=')
             if (arg_name == 'prefix'):
                 prefix = arg_val
         for item in routes.get_route():
@@ -1477,8 +1471,7 @@ class ConfigVmInterface():
         port = 8099
         ri = None
         for arg in mirror.split(','):
-            arg_name = arg.split('=')[0]
-            arg_val = arg.split('=')[1]
+            arg_name, arg_val = arg.split('=')
             if (arg_name == 'direction'):
                 direction = arg_val
             elif (arg_name == 'address'):
@@ -1789,16 +1782,13 @@ class ConfigGlobalVrouter(ConfigObject):
         linklocal_list = linklocal.get_linklocal_service_entry()
         for args in args_list:
             for arg in args.split(','):
-                arg_name = arg.split('=')[0]
-                arg_val = arg.split('=')[1]
+                arg_name, arg_val = arg.split('=')
                 if (arg_name == 'name'):
                     name = arg_val
                 elif (arg_name == 'linklocal-address'):
-                    linklocal_addr = arg_val.split(':')[0]
-                    linklocal_port = arg_val.split(':')[1]
+                    linklocal_addr, linklocal_port = arg_val.split(':')
                 elif (arg_name == 'fabric-address'):
-                    fabric_addr = arg_val.split(':')[0]
-                    fabric_port = arg_val.split(':')[1]
+                    fabric_addr, fabric_port = arg_val.split(':')
             linklocal_list.append(vnc_api.LinklocalServiceEntryType(
                     linklocal_service_name = name,
                     linklocal_service_ip = linklocal_addr,
@@ -1827,8 +1817,7 @@ class ConfigGlobalVrouter(ConfigObject):
         linklocal_list = linklocal.get_linklocal_service_entry()
         for args in args_list:
             for arg in args.split(','):
-                arg_name = arg.split('=')[0]
-                arg_val = arg.split('=')[1]
+                arg_name, arg_val = arg.split('=')
                 if (arg_name == 'name'):
                     name = arg_val
             for item in linklocal_list:
