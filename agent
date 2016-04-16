@@ -218,8 +218,7 @@ class AgentVmi(object):
         ip.add_virtual_machine_interface(vmi)
         ip.add_virtual_network(vn)
         if subnet:
-            prefix = subnet.split('/')[0]
-            length = subnet.split('/')[1]
+            prefix, length = subnet.split('/')
             l = vn.get_network_ipam_refs()[0]['attr'].get_ipam_subnets()
             for subnet in l:
                 if (subnet.get_subnet().ip_prefix == prefix) and \
