@@ -4,16 +4,22 @@ import sys
 import uuid
 import argparse
 import subprocess
+import socket
 from vnc_api import vnc_api
 
 
 agent_default = {
-    'api-server': '10.84.29.96',
-    'tenant': 'admin',
+    'api-server': '10.87.64.166',
+    'tenant': 'demo',
     'auth-username': 'admin',
     'auth-password': 'contrail123',
     'auth-tenant': 'admin',
-    'auth-server': '10.84.29.96'}
+    'auth-server': '10.87.64.166'}
+
+
+def shell_cmd(cmd):
+    output = subprocess.check_output(cmd, shell = True)
+    return output
 
 
 def to_fq_name_str(fq_name_list):
@@ -21,6 +27,36 @@ def to_fq_name_str(fq_name_list):
     for item in fq_name_list:
         fq_name_str += '%s:' %(item)
     return fq_name_str.rstrip(':')
+
+
+def show_obj(func, fq_name, args, vnc):
+    try:
+        obj = func(fq_name = fq_name)
+    except Exception as e:
+        print 'ERROR: %s' %(str(e))
+        return
+    if args.format == 'json':
+        import json
+        print json.dumps(obj, default = vnc._obj_serializer_all,
+                indent=4, separators=(',', ': '))
+    elif args.format == 'dict':
+        import pprint
+        pp = pprint.PrettyPrinter(indent = 1, width = 80)
+        pp.pprint(vnc.obj_to_dict(obj))
+    elif args.format == 'dump':
+        obj.dump()
+    else:
+        print obj.fq_name
+        print obj.uuid
+
+
+def delete_obj(func, fq_name, title, vnc):
+        try:
+            func(fq_name = fq_name)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+        else:
+            print '%s %s is deleted.' %(title, fq_name)
 
 
 class AgentArgs(object):
@@ -36,7 +72,7 @@ class AgentTenant(object):
         for item in self.vnc.projects_list()['projects']:
             print item['fq_name']
 
-    def add(self, args):
+    def create(self, args):
         domain = self.vnc.domain_read(fq_name = ['default-domain'])
         obj = vnc_api.Project(name = args.name, parent_obj = domain)
         try:
@@ -51,6 +87,216 @@ class AgentTenant(object):
             print 'ERROR: %s' %(str(e))
 
 
+class AgentServiceTemplate(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        for item in self.vnc.service_templates_list()['service-templates']:
+            print item['fq_name']
+
+    def show(self, args):
+        func = self.vnc.service_template_read
+        fq_name = ['default-domain', args.name]
+        show_obj(func, fq_name, args, self.vnc)
+
+    def create(self, args):
+        '''
+        For v2, the following parameters are ignored.
+          image_name, service_scaling, flavor, service_virtualization_type,
+          availability_zone_enable, vrouter_instance_type, instance_data
+
+        ordered_interfaces has to be true.
+        Type in interface_type has to be
+        [ management | left | right | other[0-9] ].
+        '''
+        obj = vnc_api.ServiceTemplate(name = args.name)
+        properties = vnc_api.ServiceTemplateType(version = 2,
+                service_mode = args.mode, service_type = args.type,
+                ordered_interfaces = True)
+        for interface in args.interface:
+            for arg in interface.split(','):
+                arg_name, arg_val = arg.split('=')
+                if (arg_name == 'type'):
+                    type = vnc_api.ServiceTemplateInterfaceType(
+                            service_interface_type = arg_val)
+                    properties.add_interface_type(type)
+                else:
+                    print 'ERROR: Unknown argument %s!' %arg_name
+                    return
+        obj.set_service_template_properties(properties)
+        try:
+            self.vnc.service_template_create(obj)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+
+    def delete(self, args):
+        func = self.vnc.service_template_delete
+        fq_name = ['default-domain', args.name]
+        delete_obj(func, fq_name, 'Service Template', self.vnc)
+
+
+class AgentServiceInstance(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        for item in self.vnc.service_instances_list()['service-instances']:
+            print item['fq_name']
+
+    def show(self, args):
+        func = self.vnc.service_instance_read
+        fq_name = ['default-domain', args.tenant, args.name]
+        show_obj(func, fq_name, args, self.vnc)
+
+    def get_pt_list_from_vm(self, vm_list, network):
+        pt_list = []
+        for vm_id in vm_list:
+            vm = self.vnc.virtual_machine_read(id = vm_id)
+            vmi_vn_list = []
+            for vmi_id in vm.get_virtual_machine_interface_back_refs():
+                vmi_vn = {}
+                vmi = self.vnc.virtual_machine_interface_read(id = vmi_id)
+                vmi_vn['obj'] = vmi
+                vn_fqn = vmi.get_virtual_network_refs()[0]['to']
+                vmi_vn['network'] = to_fq_name_str(vn_fqn)
+                vmi_vn_list.append(vmi_vn)
+
+            pt = {}
+            for type in network.keys():
+                for vmi_vn in vmi_vn_list:
+                    if (vmi_vn['network'] == network[type]):
+                        pt[type] = vmi_vn['obj']
+                        break
+                else:
+                    print 'ERROR: VM does not have interface on %s!' \
+                            %(network[type])
+                    return
+            pt_list.append(pt)
+        return pt_list
+
+    def get_pt_list_from_args(self, args):
+        pt_list = []
+        for pt_args in args.port_tuple:
+            pt = {}
+            for arg in pt_args.split(','):
+                port_type, port_id = arg.split('=')
+                vmi = self.vnc.virtual_machine_interface_read(id = port_id)
+                pt[port_type] = vmi
+            pt_list.append(pt)
+        return pt_list
+
+    def create_vip(self, network, tuple_list, si):
+        for type in network.keys():
+            agent_iip = AgentInstanceIp(self.vnc)
+            iip = agent_iip._allocate(
+                    si.uuid + '-' + type + '-v4',
+                    network[type])
+            port_list = []
+            for tuple in tuple_list:
+                port_list.append(tuple[type].uuid)
+            agent_iip._attach(iip, port_list)
+            tag = vnc_api.ServiceInterfaceTag(type = type)
+            si.add_instance_ip(iip, tag)
+
+    def create_port_tuple(self, tuple_list, si):
+        idx = 0
+        for tuple in tuple_list:
+            name = si.display_name + '-port-tuple-' + str(idx)
+            idx += 1
+            pt = vnc_api.PortTuple(name = name, parent_obj = si)
+            self.vnc.port_tuple_create(pt)
+            pt = self.vnc.port_tuple_read(id = pt.uuid)
+
+            # Update VMIs to refer to the port tuple.
+            for type in tuple.keys():
+                tuple[type].add_port_tuple(pt)
+                self.vnc.virtual_machine_interface_update(tuple[type])
+
+    def create(self, args):
+        '''
+        For v2, the following parameters are ignored.
+          left_virtual_network, right_virtual_network,
+          management_virtual_network
+        '''
+        parent = self.vnc.project_read(
+                fq_name = ['default-domain', args.tenant])
+        st = self.vnc.service_template_read(
+                fq_name = ['default-domain', args.template])
+        si_id = str(uuid.uuid4())
+
+        si = vnc_api.ServiceInstance(name = args.name, parent_obj = parent)
+        si.uuid = si_id
+        si.add_service_template(st)
+
+        # Build interface list, the order has to be the same as it in
+        # service template.
+        properties = vnc_api.ServiceInstanceType()
+        network = {}
+        for arg in args.network.split(','):
+            arg_name, arg_val = arg.split('=')
+            network[arg_name] = arg_val
+        st_properties = st.get_service_template_properties()
+        for st_interface in st_properties.get_interface_type():
+            type = st_interface.get_service_interface_type()
+            interface = vnc_api.ServiceInstanceInterfaceType()
+            interface.set_virtual_network(network[type])
+            properties.add_interface_list(interface)
+
+        if args.vm:
+            pt_list = self.get_pt_list_from_vm(vm, network)
+        else
+            pt_list = self.get_pt_list_from_args(args)
+        if not pt_list:
+            return
+
+        # Create a VIP on each network.
+        self.create_vip(network, pt_list, si)
+
+        si.set_service_instance_properties(properties)
+        try:
+            self.vnc.service_instance_create(si)
+            si = self.vnc.service_instance_read(id = si.uuid)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+            return
+
+        # Create port tuple.
+        self.create_port_tuple(pt_list, si)
+
+    def delete_port_tuple(self, pt_list):
+        if not pt_list:
+            return
+        for pt_child in pt_list:
+            pt = self.vnc.port_tuple_read(id = pt_child['uuid'])
+            for vim_bref in pt.get_virtual_machine_interface_back_refs():
+                vim = self.vnc.virtual_machine_interface_read(
+                        id = vim_bref['uuid'])
+                vim.del_port_tuple(pt)
+                self.vnc.virtual_machine_interface_update(vim)
+            self.vnc.port_tuple_delete(id = pt.uuid)
+
+    def delete(self, args):
+        si = self.vnc.service_instance_read(
+                fq_name = ['default-domain', args.tenant, args.name])
+
+        # Update VMI reference and delete port tuples.
+        self.delete_port_tuple(si.get_port_tuples())
+
+        # Get instance IP list.
+        iip_list = []
+        if si.get_instance_ip_refs():
+            for iip_ref in si.get_instance_ip_refs():
+                iip_list.append(iip_ref['uuid'])
+
+        # Delete service instance.
+        self.vnc.service_instance_delete(id = si.uuid)
+
+        # Delete instance IPs.
+        for id in iip_list:
+            self.vnc.instance_ip_delete(id = id)
+
+
 class AgentInstanceIp(object):
     def __init__(self, vnc):
         self.vnc = vnc
@@ -60,6 +306,7 @@ class AgentInstanceIp(object):
             iip = self.vnc.instance_ip_read(id = item['uuid'])
             name_str = to_fq_name_str(iip.fq_name)
             print name_str
+            print iip.uuid
             print '    Address: %s' %(iip.instance_ip_address)
             name_str = to_fq_name_str(
                     iip.get_virtual_network_refs()[0]['to'])
@@ -69,8 +316,52 @@ class AgentInstanceIp(object):
             print '    VMI:     %s' %(name_str)
             print ''
 
-    def add(self, args):
-        pass
+    def show(self, args):
+        func = self.vnc.instance_ip_read
+        fq_name = [args.name]
+        show_obj(func, fq_name, args, self.vnc)
+
+    def _attach(self, iip, port_list):
+        for port in port_list:
+            vmi = self.vnc.virtual_machine_interface_read(id = port)
+            iip.add_virtual_machine_interface(vmi)
+        self.vnc.instance_ip_update(iip)
+
+    def _allocate(self, name, network, subnet = None):
+        if (name == 'id'):
+            id = str(uuid.uuid4())
+            iip = vnc_api.InstanceIp(name = id)
+            iip.uuid = id
+        else:
+            iip = vnc_api.InstanceIp(name = name)
+        vn = self.vnc.virtual_network_read(fq_name = network.split(':'))
+        iip.add_virtual_network(vn)
+        if subnet:
+            prefix, length = subnet.split('/')
+            l = vn.get_network_ipam_refs()[0]['attr'].get_ipam_subnets()
+            for item in l:
+                if (item.get_subnet().ip_prefix == prefix) and \
+                        (item.get_subnet().ip_prefix_len == int(length)):
+                    iip.subnet_uuid = item.subnet_uuid
+                    break
+        self.vnc.instance_ip_create(iip)
+        return self.vnc.instance_ip_read(id = iip.uuid)
+
+    def allocate(self, args):
+        network = 'default-domain:' + args.tenant + ':' + args.network
+        iip = self._allocate(args.name, network, args.subnet)
+        print '%s' %(iip.uuid)
+        print '%s' %(iip.instance_ip_address)
+
+    def attach(self, args):
+        iip = self.vnc.instance_ip_read(id = args.id)
+        self._attach(iip, args.port)
+
+    def release(self, args):
+        try:
+            self.vnc.instance_ip_delete(id = args.id)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
 
 
 class AgentIpam(object):
@@ -81,7 +372,7 @@ class AgentIpam(object):
         for item in self.vnc.network_ipams_list()['network-ipams']:
             print item['fq_name']
 
-    def add(self, args):
+    def create(self, args):
         tenant = self.vnc.project_read(
                 fq_name = ['default-domain', args.tenant])
         obj = vnc_api.NetworkIpam(name = args.name, parent_obj = tenant)
@@ -190,7 +481,233 @@ class AgentFloatingIp(object):
         self.vnc.floating_ip_update(fip)
 
 
-class AgentVmi(object):
+class AgentCni(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def create(self, args):
+        container_name = '%s-%s' % (socket.gethostname(), args.id)
+        pid = shell_cmd('docker inspect -f \'{{.State.Pid}}\' %s' \
+                %(args.id))
+        pid = pid.rstrip('\n')
+        shell_cmd('mkdir -p /var/run/netns')
+        shell_cmd('sudo ln -sf /proc/%s/ns/net /var/run/netns/%s' \
+                %(pid, args.id))
+        # Virtual machine
+        try:
+            vm = self.vnc.virtual_machine_read(fq_name = [container_name])
+        except vnc_api.NoIdError:
+            vm = vnc_api.VirtualMachine(container_name)
+            self.vnc.virtual_machine_create(vm)
+            vm = self.vnc.virtual_machine_read(id = vm.uuid)
+
+        # VMI
+        agent_vmi = AgentPort(self.vnc)
+        vmi_args = AgentArgs()
+        vmi_args.name = 'id'
+        vmi_args.tenant = args.tenant
+        vmi_args.network = args.network
+        vmi_args.vm = vm.uuid
+        vmi = agent_vmi.create(vmi_args)
+
+        # CNI
+        mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
+        l = mac.split(':')
+        ns_name = 'cni' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
+        shell_cmd('sudo ip link add %s type veth peer name %s' \
+                %(ns_name, args.veth))
+        shell_cmd('sudo ip link set %s address %s' %(args.veth, mac))
+        shell_cmd('sudo ip link set %s netns %s' %(args.veth, args.id))
+        shell_cmd('sudo ip link set %s up' %(ns_name))
+
+        # Plug VMI
+        from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
+        api = ContrailVRouterApi()
+        api.add_port(vm.uuid, vmi.uuid, ns_name, mac, port_type = 'NovaVMPort')
+
+        # dhclient
+        lease_path = '/var/lib/dhclient/%s' %(args.id)
+        pid_path = '/var/run/%s' %(args.id)
+        shell_cmd('mkdir -p %s' %(lease_path))
+        shell_cmd('mkdir -p %s' %(pid_path))
+        shell_cmd('ip netns exec %s dhclient -lf %s/dhclient.%s.leases ' \
+            '-pf %s/dhclient.%s.pid %s' \
+            %(args.id, lease_path, args.veth, pid_path, args.veth, args.veth))
+
+    def delete(self, args):
+        container_name = '%s-%s' % (socket.gethostname(), args.id)
+        try:
+            vm = self.vnc.virtual_machine_read(fq_name = [container_name])
+        except vnc_api.NoIdError:
+            print 'ERROR: VM %s does not exist!' %(container_name)
+            return
+
+        # dhclient
+        lease_path = '/var/lib/dhclient/%s' %(args.id)
+        pid_path = '/var/run/%s' %(args.id)
+        output = shell_cmd('ip netns exec %s ip link' %(args.id))
+        for line in output.split('\n'):
+            l = line.split(' ')
+            if not l[0]:
+                continue
+            if_name = l[1].rstrip(':')
+            if (if_name == 'lo'):
+                continue
+            shell_cmd('ip netns exec %s dhclient -x ' \
+                    '-lf %s/dhclient.%s.leases ' \
+                    '-pf %s/dhclient.%s.pid %s' \
+                    %(args.id, lease_path, if_name, pid_path, if_name, if_name))
+        shell_cmd('rm -fr %s' %(lease_path))
+        shell_cmd('rm -fr %s' %(pid_path))
+
+        # VMI
+        from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
+        vmi_list = vm.get_virtual_machine_interface_back_refs()
+        for ref in vmi_list:
+            api = ContrailVRouterApi()
+            api.delete_port(ref['uuid'])
+
+            vmi = self.vnc.virtual_machine_interface_read(id = ref['uuid'])
+
+            # CNI
+            mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
+            l = mac.split(':')
+            ns_name = 'cni' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
+            shell_cmd('ip link delete %s' %(ns_name))
+
+            # Delete IP address
+            ip_list = vmi.get_instance_ip_back_refs()
+            if ip_list:
+                for ip in ip_list:
+                    self.vnc.instance_ip_delete(id = ip['uuid'])
+
+            self.vnc.virtual_machine_interface_delete(id = vmi.uuid)
+
+        # VM
+        self.vnc.virtual_machine_delete(id = vm.uuid)
+        shell_cmd('ip netns delete %s' %(args.id))
+
+
+class AgentTap(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        pass
+
+    def show(self, args):
+        pass
+
+    def create(self, args):
+        # Virtual machine
+        try:
+            vm = self.vnc.virtual_machine_read(fq_name = [args.vm_name])
+        except vnc_api.NoIdError:
+            vm = vnc_api.VirtualMachine(args.vm_name)
+            self.vnc.virtual_machine_create(vm)
+            vm = self.vnc.virtual_machine_read(id = vm.uuid)
+
+        # Virtual machine interface
+        agent_vmi = AgentPort(self.vnc)
+        vmi_args = AgentArgs()
+        vmi_args.name = 'id'
+        vmi_args.tenant = args.tenant
+        vmi_args.network = args.network
+        vmi_args.vm = vm.uuid
+        vmi = agent_vmi.add(vmi_args)
+
+        # TAP interface
+        mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
+        l = mac.split(':')
+        tap_name = 'tap' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
+        subprocess.check_output('sudo ip tuntap add %s mode tap' %(tap_name),
+                shell = True)
+        subprocess.check_output('sudo ip link set %s up' %(tap_name),
+                shell = True)
+
+        # Plug VMI
+        from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
+        api = ContrailVRouterApi()
+        api.add_port(vm.uuid, vmi.uuid, tap_name, mac,
+                port_type = 'NovaVMPort')
+
+        print '      <mac address="%s"/>' %(mac)
+        print '      <target dev="%s"/>' %(tap_name)
+
+    def interface_delete(self, vmi_uuid):
+        vmi = self.vnc.virtual_machine_interface_read(id = vmi_uuid)
+
+        # Unplug VMI
+        from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
+        api = ContrailVRouterApi()
+        api.delete_port(vmi_uuid)
+
+        # Delete TAP interface
+        mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
+        l = mac.split(':')
+        tap_name = 'tap' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
+        shell_cmd('sudo ip link set %s down' %(tap_name))
+        shell_cmd('sudo ip link delete %s' %(tap_name))
+
+        # Delete IP address
+        ip_list = vmi.get_instance_ip_back_refs()
+        if ip_list:
+            for ip in ip_list:
+                self.vnc.instance_ip_delete(id = ip['uuid'])
+
+        self.vnc.virtual_machine_interface_delete(id = vmi_uuid)
+
+    def delete(self, args):
+        try:
+            vm = self.vnc.virtual_machine_read(fq_name = [args.vm_name])
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+            return
+
+        vmi_list = vm.get_virtual_machine_interface_back_refs()
+        if vmi_list:
+            for vmi in vmi_list:
+                self.interface_delete(vmi['uuid'])
+        self.vnc.virtual_machine_delete(id = vm.uuid)
+
+
+class AgentVm(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        for vm in self.vnc.virtual_machines_list()['virtual-machines']:
+            print vm['fq_name']
+
+    def show(self, args):
+        if args.format:
+            func = self.vnc.virtual_machine_read
+            fq_name = [args.name]
+            show_obj(func, fq_name, args, self.vnc)
+        else:
+            vm = self.vnc.virtual_machine_read(fq_name = [args.name])
+            print vm.get_fq_name()
+            vmi_list = vm.get_virtual_machine_interface_back_refs()
+            if not vmi_list:
+                return
+            for item in vmi_list:
+                vmi = self.vnc.virtual_machine_interface_read(id = item['uuid'])
+                print 'Port: %s' %(vmi.get_fq_name())
+                print '    Network: %s' \
+                        %(vmi.get_virtual_network_refs()[0]['to'])
+                mac = vmi.get_virtual_machine_interface_mac_addresses()
+                print '    MAC: %s' %(mac.get_mac_address()[0])
+                ip_list = vmi.get_instance_ip_back_refs()
+                if ip_list:
+                    ip_str = ''
+                    for ip in ip_list:
+                        ip = self.vnc.instance_ip_read(id = ip['uuid'])
+                        ip_str += ' %s' %(ip.get_instance_ip_address())
+                    print '    IP:%s' %(ip_str)
+                print ''
+
+
+class AgentPort(object):
     def __init__(self, vnc):
         self.vnc = vnc
 
@@ -210,6 +727,11 @@ class AgentVmi(object):
                 print '  IP:%s' %(ip_str)
             print ''
 
+    def show(self, args):
+        func = self.vnc.virtual_machine_interface_read
+        fq_name = ['default-domain', args.tenant, args.name]
+        show_obj(func, fq_name, args, self.vnc)
+
     def ip_add(self, vmi, vn, subnet):
         # IP address
         id = str(uuid.uuid4())
@@ -227,7 +749,7 @@ class AgentVmi(object):
                     break
         self.vnc.instance_ip_create(ip)
 
-    def add(self, args):
+    def create(self, args):
         tenant = self.vnc.project_read(
                 fq_name = ['default-domain', args.tenant])
         if (args.name == 'id'):
@@ -250,6 +772,9 @@ class AgentVmi(object):
         if hasattr(args, 'vm') and args.vm:
             vm_obj = self.vnc.virtual_machine_read(id = args.vm)
             vmi.add_virtual_machine(vm_obj)
+        sg = self.vnc.security_group_read(
+                    fq_name = ['default-domain', args.tenant, 'default'])
+        vmi.add_security_group(sg)
         self.vnc.virtual_machine_interface_create(vmi)
         vmi = self.vnc.virtual_machine_interface_read(id = vmi.uuid)
 
@@ -277,110 +802,67 @@ class AgentVmi(object):
             print 'ERROR: %s' %(str(e))
 
 
-class AgentVm(object):
+class AgentNetwork(object):
     def __init__(self, vnc):
         self.vnc = vnc
 
     def list(self, args):
-        for vm in self.vnc.virtual_machines_list()['virtual-machines']:
-            print vm['fq_name']
+        for item in self.vnc.virtual_networks_list()['virtual-networks']:
+            print item['fq_name']
 
     def show(self, args):
-        vm = self.vnc.virtual_machine_read(fq_name = [args.name])
-        print vm.get_fq_name()
-        vmi_list = vm.get_virtual_machine_interface_back_refs()
-        if not vmi_list:
-            return
-        for item in vmi_list:
-            vmi = self.vnc.virtual_machine_interface_read(id = item['uuid'])
-            print 'VMI: %s' %(vmi.get_fq_name())
-            mac = vmi.get_virtual_machine_interface_mac_addresses()
-            print '    MAC: %s' %(mac.get_mac_address()[0])
-            ip_list = vmi.get_instance_ip_back_refs()
-            if ip_list:
-                ip_str = ''
-                for ip in ip_list:
-                    ip = self.vnc.instance_ip_read(id = ip['uuid'])
-                    ip_str += ' %s' %(ip.get_instance_ip_address())
-                print '    IP:%s' %(ip_str)
-            print ''
+        func = self.vnc.virtual_network_read
+        fq_name = ['default-domain', args.tenant, args.name]
+        show_obj(func, fq_name, args, self.vnc)
 
-    def add(self, args):
-        # Virtual machine
+    def create(self, args):
+        tenant = self.vnc.project_read(
+                fq_name = ['default-domain', args.tenant])
+        vn = vnc_api.VirtualNetwork(name = args.name, parent_obj = tenant)
         try:
-            vm = self.vnc.virtual_machine_read(fq_name = [args.name])
-            print 'VM %s already exists.' %(args.name)
-            return None
-        except vnc_api.NoIdError:
-            pass
-        vm = vnc_api.VirtualMachine(args.name)
-        self.vnc.virtual_machine_create(vm)
-        vm = self.vnc.virtual_machine_read(id = vm.uuid)
-
-        # Virtual machine interface
-        agent_vmi = AgentVmi(self.vnc)
-        vmi_args = AgentArgs()
-        vmi_args.name = 'id'
-        vmi_args.tenant = args.tenant
-        vmi_args.network = args.network
-        vmi_args.vm = vm.uuid
-        vmi = agent_vmi.add(vmi_args)
-
-        # TAP interface
-        mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
-        l = mac.split(':')
-        tap_name = 'tap' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
-        subprocess.check_output('sudo ip tuntap add %s mode tap' %(tap_name),
-                shell = True)
-        subprocess.check_output('sudo ip link set %s up' %(tap_name),
-                shell = True)
-
-        # Plug VMI
-        from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
-        api = ContrailVRouterApi()
-        api.add_port(vm.uuid, vmi.uuid, tap_name, mac,
-                port_type = 'NovaVMPort')
-
-        print '      <mac address="%s"/>' %(mac)
-        print '      <target dev="%s"/>' %(tap_name)
-
-    def vmi_delete(self, vmi_uuid):
-        vmi = self.vnc.virtual_machine_interface_read(id = vmi_uuid)
-
-        # Unplug VMI
-        from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
-        api = ContrailVRouterApi()
-        api.delete_port(vmi_uuid)
-
-        # Delete TAP interface
-        mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
-        l = mac.split(':')
-        tap_name = 'tap' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
-        subprocess.check_output('sudo ip link set %s down' %(tap_name),
-                shell = True)
-        subprocess.check_output('sudo ip link delete %s' %(tap_name),
-                shell = True)
-
-        # Delete IP address
-        ip_list = vmi.get_instance_ip_back_refs()
-        if ip_list:
-            for ip in ip_list:
-                self.vnc.instance_ip_delete(id = ip['uuid'])
-
-        self.vnc.virtual_machine_interface_delete(id = vmi_uuid)
+            self.vnc.virtual_network_create(vn)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
 
     def delete(self, args):
         try:
-            vm = self.vnc.virtual_machine_read(fq_name = [args.name])
+            self.vnc.virtual_network_delete(
+                    fq_name = ['default-domain', args.tenant, args.name])
         except Exception as e:
             print 'ERROR: %s' %(str(e))
-            return
 
-        vmi_list = vm.get_virtual_machine_interface_back_refs()
-        if vmi_list:
-            for vmi in vmi_list:
-                self.vmi_delete(vmi['uuid'])
-        self.vnc.virtual_machine_delete(id = vm.uuid)
+    def subnet_add(self, args):
+        vn = self.vnc.virtual_network_read(
+                fq_name = ['default-domain', args.tenant, args.name])
+        ipam = self.vnc.network_ipam_read(
+                fq_name = ['default-domain', args.tenant, args.ipam])
+        ipam_subnet = vnc_api.IpamSubnetType()
+        prefix, prefix_len = args.cidr.split('/')
+        subnet = vnc_api.SubnetType(prefix, prefix_len)
+        ipam_subnet.set_subnet(subnet)
+        if args.gateway:
+            ipam_subnet.set_default_gateway(args.gateway)
+        if args.service:
+            ipam_subnet.set_dns_server_address(args.service)
+        vn_subnets = vnc_api.VnSubnetsType()
+        vn_subnets.add_ipam_subnets(ipam_subnet)
+        vn.add_network_ipam(ref_obj = ipam, ref_data = vn_subnets)
+        self.vnc.virtual_network_update(vn)
+
+    def policy_attach(self, args):
+        pass
+
+    def policy_detach(self, args):
+        pass
+
+
+class AgentUtils(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def id_to_name(self, args):
+        name = self.vnc.id_to_fq_name(args.id)
+        print name
 
 
 class Agent(object):
@@ -421,25 +903,25 @@ class Agent(object):
                 help = 'Print help messages.')
         sub_parser.set_defaults(op = 'help')
 
-        #### Floating IP
-        sub_parser = subparsers.add_parser('floating-ip-list',
+        #### floating IP
+        sub_parser = subparsers.add_parser('fip-list',
                 help = 'List floating IPs.')
         sub_parser.set_defaults(obj_class = AgentFloatingIp, op = 'list')
 
-        sub_parser = subparsers.add_parser('floating-ip-allocate',
+        sub_parser = subparsers.add_parser('fip-allocate',
                 help = 'Allocate a floating IP.')
         sub_parser.set_defaults(obj_class = AgentFloatingIp, op = 'allocate')
         sub_parser.add_argument('--pool', required = True,
                 metavar = '<tenant>:<network>:<pool>',
                 help='The name of floating IP pool')
 
-        sub_parser = subparsers.add_parser('floating-ip-release',
+        sub_parser = subparsers.add_parser('fip-release',
                 help = 'Release a floating IP.')
         sub_parser.set_defaults(obj_class = AgentFloatingIp, op = 'release')
         sub_parser.add_argument('name', metavar = '<IP address>',
                 help='The floating IP address')
 
-        sub_parser = subparsers.add_parser('floating-ip-attach',
+        sub_parser = subparsers.add_parser('fip-attach',
                 help = 'Attach a floating IP to an IP.')
         sub_parser.set_defaults(obj_class = AgentFloatingIp, op = 'attach')
         sub_parser.add_argument('name', metavar = '<IP address>',
@@ -450,7 +932,7 @@ class Agent(object):
         sub_parser.add_argument('--address', metavar = '<IP address>',
                 help='The IP address that floating IP address is attached to')
 
-        sub_parser = subparsers.add_parser('floating-ip-detach',
+        sub_parser = subparsers.add_parser('fip-detach',
                 help = 'Detach a floating IP from an IP.')
         sub_parser.set_defaults(obj_class = AgentFloatingIp, op = 'detach')
         sub_parser.add_argument('name', metavar = '<IP address>',
@@ -459,23 +941,54 @@ class Agent(object):
                 metavar = '<UUID> | <VM>:<VN>',
                 help='The virtual machine interface')
 
-        #### Instance IP
-        sub_parser = subparsers.add_parser('instance-ip-add',
-                help = 'Add an instance IP.')
-        sub_parser.set_defaults(obj_class = AgentInstanceIp, op = 'add')
+        ### utils
+        sub_parser = subparsers.add_parser('id-to-name',
+                help = 'Get FQ name by UUID.')
+        sub_parser.set_defaults(obj_class = AgentUtils, op = 'id_to_name')
+        sub_parser.add_argument('id', help='UUID')
 
-        sub_parser = subparsers.add_parser('instance-ip-delete',
-                help = 'Delete an instance IP.')
-        sub_parser.set_defaults(obj_class = AgentInstanceIp, op = 'delete')
 
-        sub_parser = subparsers.add_parser('instance-ip-list',
+        #### instance IP
+        sub_parser = subparsers.add_parser('iip-list',
                 help = 'List instance IPs.')
         sub_parser.set_defaults(obj_class = AgentInstanceIp, op = 'list')
 
+        sub_parser = subparsers.add_parser('iip-show',
+                help = 'Show instance IP.')
+        sub_parser.set_defaults(obj_class = AgentInstanceIp, op = 'show')
+        sub_parser.add_argument('name', help='Instance IP name')
+        sub_parser.add_argument('--format',
+                choices = ['json', 'dict', 'dump'], metavar = '<format>',
+                help = 'Output format [ json | dict | dump ]')
+
+        sub_parser = subparsers.add_parser('iip-allocate',
+                help = 'Allocate an instance IP.')
+        sub_parser.set_defaults(obj_class = AgentInstanceIp, op = 'allocate')
+        sub_parser.add_argument('name', metavar = '<name> | id',
+                help='Instance IP name')
+        sub_parser.add_argument('--network', required = True,
+                metavar = 'name', help='Virtual network name')
+        sub_parser.add_argument('--subnet', metavar = '<prefix>/<length>',
+                help='Subnet CIDR')
+
+        sub_parser = subparsers.add_parser('iip-attach',
+                help = 'Attach an instance IP to port.')
+        sub_parser.set_defaults(obj_class = AgentInstanceIp, op = 'attach')
+        sub_parser.add_argument('id', metavar = 'UUID',
+                help='Instance IP UUID')
+        sub_parser.add_argument('--port', required = True, action = 'append',
+                metavar = 'UUID', help='Port UUID')
+
+        sub_parser = subparsers.add_parser('iip-release',
+                help = 'Release an instance IP.')
+        sub_parser.set_defaults(obj_class = AgentInstanceIp, op = 'release')
+        sub_parser.add_argument('id', metavar = 'UUID',
+                help='Instance IP UUID')
+
         #### IPAM
-        sub_parser = subparsers.add_parser('ipam-add',
-                help = 'Add an IPAM.')
-        sub_parser.set_defaults(obj_class = AgentIpam, op = 'add')
+        sub_parser = subparsers.add_parser('ipam-create',
+                help = 'Create an IPAM.')
+        sub_parser.set_defaults(obj_class = AgentIpam, op = 'create')
         sub_parser.add_argument('name', help='IPAM name')
 
         sub_parser = subparsers.add_parser('ipam-delete',
@@ -487,10 +1000,211 @@ class Agent(object):
                 help = 'List IPAMs.')
         sub_parser.set_defaults(obj_class = AgentIpam, op = 'list')
 
-        #### Tenant
-        sub_parser = subparsers.add_parser('tenant-add',
-                help = 'Add a tenant/project.')
-        sub_parser.set_defaults(obj_class = AgentTenant, op = 'add')
+        #### container network interface
+        sub_parser = subparsers.add_parser('cni-create',
+                help = 'Create container network interface.')
+        sub_parser.set_defaults(obj_class = AgentCni, op = 'create')
+        sub_parser.add_argument('--id', required = True,
+                metavar = '<ID>', help='Container ID')
+        sub_parser.add_argument('--network', required = True,
+                metavar = '<name>', help='Virtual network name')
+        sub_parser.add_argument('--veth', required = True,
+                metavar = '<name>',
+                help='VETH interface name in the container')
+
+        sub_parser = subparsers.add_parser('cni-delete',
+                help = 'Delete container network interface.')
+        sub_parser.set_defaults(obj_class = AgentCni, op = 'delete')
+        sub_parser.add_argument('--id', required = True,
+                metavar = '<ID>', help='Container ID')
+
+        #### network
+        sub_parser = subparsers.add_parser('network-list',
+                help = 'List virtual networks.')
+        sub_parser.set_defaults(obj_class = AgentNetwork, op = 'list')
+
+        sub_parser = subparsers.add_parser('network-show',
+                help = 'Show virtual network.')
+        sub_parser.set_defaults(obj_class = AgentNetwork, op = 'show')
+        sub_parser.add_argument('name', help='Network name')
+        sub_parser.add_argument('--format',
+                choices = ['json', 'dict', 'dump'], metavar = '<format>',
+                help = 'Output format [ json | dict | dump ]')
+
+        sub_parser = subparsers.add_parser('network-create',
+                help = 'Create a virtual network.')
+        sub_parser.set_defaults(obj_class = AgentNetwork, op = 'create')
+        sub_parser.add_argument('name', help='Network name')
+
+        sub_parser = subparsers.add_parser('network-delete',
+                help = 'Delete a virtual network.')
+        sub_parser.set_defaults(obj_class = AgentNetwork, op = 'delete')
+        sub_parser.add_argument('name', help='Network name')
+
+        sub_parser = subparsers.add_parser('network-policy-attach',
+                help = 'Attach a policy to the virtual network.')
+        sub_parser.set_defaults(obj_class = AgentNetwork, op = 'policy_attach')
+        sub_parser.add_argument('name', help='Network name')
+        sub_parser.add_argument('--policy', required = True,
+                help='Policy name')
+
+        sub_parser = subparsers.add_parser('network-policy-detach',
+                help = 'Detach a policy to the virtual network.')
+        sub_parser.set_defaults(obj_class = AgentNetwork, op = 'policy_detach')
+        sub_parser.add_argument('name', help='Network name')
+        sub_parser.add_argument('--policy', required = True,
+                help='Policy name')
+
+        sub_parser = subparsers.add_parser('network-subnet-add',
+                help = 'Add a subnet to the virtual network.')
+        sub_parser.set_defaults(obj_class = AgentNetwork, op = 'subnet_add')
+        sub_parser.add_argument('name', help='Network name')
+        sub_parser.add_argument('--cidr', required = True,
+                metavar = '<prefix>/<length>', help='Subnet CIDR')
+        sub_parser.add_argument('--ipam', required = True,
+                help='IPAM name')
+        sub_parser.add_argument('--gateway', metavar = 'address',
+                help='Gateway address')
+        sub_parser.add_argument('--service', metavar = 'address',
+                help='Service address')
+        sub_parser.add_argument('--dhcp', metavar = 'enable | disable',
+                help='Enable or disable DHCP service')
+        sub_parser.add_argument('--dns', metavar = 'enable | disable',
+                help='Enable or disable DNS service')
+
+
+        #### port
+        sub_parser = subparsers.add_parser('port-list',
+                help = 'List port.')
+        sub_parser.set_defaults(obj_class = AgentPort, op = 'list')
+
+        sub_parser = subparsers.add_parser('port-show',
+                help = 'Show port.')
+        sub_parser.set_defaults(obj_class = AgentPort, op = 'show')
+        sub_parser.add_argument('name', help='Port name')
+        sub_parser.add_argument('--format',
+                choices = ['json', 'dict', 'dump'], metavar = '<format>',
+                help = 'Output format [ json | dict | dump ]')
+
+        sub_parser = subparsers.add_parser('port-create',
+                help = 'Create a port.')
+        sub_parser.set_defaults(obj_class = AgentPort, op = 'create')
+        sub_parser.add_argument('name', metavar = '<name> | id',
+                help='Port name')
+        sub_parser.add_argument('--network', required = True,
+                metavar = '<name>[:<subnet prefix>/<length>[...]]',
+                help='Virtual network name')
+
+        sub_parser = subparsers.add_parser('port-delete',
+                help = 'Delete a port.')
+        sub_parser.set_defaults(obj_class = AgentPort, op = 'delete')
+        sub_parser.add_argument('name', metavar = '<name> | id',
+                help='Port name')
+
+        self.parser = parser
+
+        #### service template
+        sub_parser = subparsers.add_parser('service-template-list',
+                help = 'List service templates.')
+        sub_parser.set_defaults(obj_class = AgentServiceTemplate,
+                op = 'list')
+
+        sub_parser = subparsers.add_parser('service-template-show',
+                help = 'Show service template.')
+        sub_parser.set_defaults(obj_class = AgentServiceTemplate,
+                op = 'show')
+        sub_parser.add_argument('name', help='Service template name')
+        sub_parser.add_argument('--format',
+                choices = ['json', 'dict', 'dump'], metavar = '<format>',
+                help = 'Output format [ json | dict | dump ]')
+
+        sub_parser = subparsers.add_parser('service-template-create',
+                help = 'Create a service template.')
+        sub_parser.set_defaults(obj_class = AgentServiceTemplate,
+                op = 'create')
+        sub_parser.add_argument('name', help='Service template name')
+        sub_parser.add_argument('--mode',
+                choices = ['transparent', 'in-network', 'in-network-nat'],
+                metavar = '<mode>',
+                help = 'Service mode ' \
+                       '[ transparent | in-network | in-network-nat ]')
+        sub_parser.add_argument('--type',
+                choices = ['firewall', 'analyzer'],
+                metavar = '<type>',
+                help = 'Service type ' \
+                       '[ firewall | analyzer | source-nat | loadbalancer ]')
+        sub_parser.add_argument('--interface', action = 'append',
+                metavar = '<arguments>',
+                help = 'Interface ' \
+                       'type=[ left | right | management | other[0-9] ]')
+
+        sub_parser = subparsers.add_parser('service-template-delete',
+                help = 'Delete a service template.')
+        sub_parser.set_defaults(obj_class = AgentServiceTemplate,
+                op = 'delete')
+        sub_parser.add_argument('name', help='Service template name')
+
+        #### service instance
+        sub_parser = subparsers.add_parser('service-instance-list',
+                help = 'List service instances.')
+        sub_parser.set_defaults(obj_class = AgentServiceInstance,
+                op = 'list')
+
+        sub_parser = subparsers.add_parser('service-instance-show',
+                help = 'Show service instance.')
+        sub_parser.set_defaults(obj_class = AgentServiceInstance,
+                op = 'show')
+        sub_parser.add_argument('name', help='Service instance name')
+        sub_parser.add_argument('--format',
+                choices = ['json', 'dict', 'dump'], metavar = '<format>',
+                help = 'Output format [ json | dict | dump ]')
+
+        sub_parser = subparsers.add_parser('service-instance-create',
+                help = 'Create a service instance.')
+        sub_parser.set_defaults(obj_class = AgentServiceInstance,
+                op = 'create')
+        sub_parser.add_argument('name', help='Service instance name')
+        sub_parser.add_argument('--template', help = 'Service template')
+        sub_parser.add_argument('--network', metavar = '<arguments>',
+                help = 'Network ' \
+                       'management=<network FQ name>,' \
+                       'left=<network FQ name>,' \
+                       'right=<network FQ name>,' \
+                       'other[0-9]=<network FQ name>')
+        sub_parser.add_argument('--port-tuple', action = 'append',
+                metavar = '<arguments>',
+                help = 'Port tuple ' \
+                       'management=<port UUID>,' \
+                       'left=<port UUID>,' \
+                       'right=<port UUID>,' \
+                       'other[0-9]=<port UUID>')
+        sub_parser.add_argument('--vm', action = 'append',
+                metavar = '<UUID>', help = 'VM UUID')
+
+        sub_parser = subparsers.add_parser('service-instance-delete',
+                help = 'Delete a service instance.')
+        sub_parser.set_defaults(obj_class = AgentServiceInstance,
+                op = 'delete')
+        sub_parser.add_argument('name', help='Service instance name')
+
+        #### tap interface
+        sub_parser = subparsers.add_parser('tap-create',
+                help = 'Create a tap interface for the VM.')
+        sub_parser.set_defaults(obj_class = AgentTap, op = 'create')
+        sub_parser.add_argument('vm-name', help='VM name')
+        sub_parser.add_argument('--network', required = True,
+                metavar = '<name>[:<subnet prefix>/<length>[...]]',
+                help='Virtual network name')
+
+        sub_parser = subparsers.add_parser('tap-delete',
+                help = 'Delete all tap interfaces of the virtual machine.')
+        sub_parser.set_defaults(obj_class = AgentTap, op = 'delete')
+        sub_parser.add_argument('vm-name', help='VM name')
+
+        #### tenant
+        sub_parser = subparsers.add_parser('tenant-create',
+                help = 'Create a tenant/project.')
+        sub_parser.set_defaults(obj_class = AgentTenant, op = 'create')
         sub_parser.add_argument('name', help='Tenant name')
 
         sub_parser = subparsers.add_parser('tenant-delete',
@@ -503,19 +1217,6 @@ class Agent(object):
         sub_parser.set_defaults(obj_class = AgentTenant, op = 'list')
 
         #### VM
-        sub_parser = subparsers.add_parser('vm-add',
-                help = 'Add a virtual machine.')
-        sub_parser.set_defaults(obj_class = AgentVm, op = 'add')
-        sub_parser.add_argument('name', help='VM name')
-        sub_parser.add_argument('--network', required = True,
-                metavar = '<name>[:<subnet prefix>/<length>[...]]',
-                help='Virtual network name')
-
-        sub_parser = subparsers.add_parser('vm-delete',
-                help = 'Delete a virtual machine.')
-        sub_parser.set_defaults(obj_class = AgentVm, op = 'delete')
-        sub_parser.add_argument('name', help='VM name')
-
         sub_parser = subparsers.add_parser('vm-list',
                 help = 'List virtual machines.')
         sub_parser.set_defaults(obj_class = AgentVm, op = 'list')
@@ -524,28 +1225,10 @@ class Agent(object):
                 help = 'Show a virtual machine.')
         sub_parser.set_defaults(obj_class = AgentVm, op = 'show')
         sub_parser.add_argument('name', help='VM name')
+        sub_parser.add_argument('--format',
+                choices = ['json', 'dict', 'dump'], metavar = '<format>',
+                help = 'Output format [ json | dict | dump ]')
 
-        #### VMI
-        sub_parser = subparsers.add_parser('vmi-add',
-                help = 'Add a virtual machine interface.')
-        sub_parser.set_defaults(obj_class = AgentVmi, op = 'add')
-        sub_parser.add_argument('name', metavar = '<name> | id',
-                help='VMI name')
-        sub_parser.add_argument('--network', required = True,
-                metavar = '<name>[:<subnet prefix>/<length>[...]]',
-                help='Virtual network name')
-
-        sub_parser = subparsers.add_parser('vmi-delete',
-                help = 'Delete a virtual machine interface.')
-        sub_parser.set_defaults(obj_class = AgentVmi, op = 'delete')
-        sub_parser.add_argument('name', metavar = '<name> | id',
-                help='VMI name')
-
-        sub_parser = subparsers.add_parser('vmi-list',
-                help = 'List virtual machine interfaces.')
-        sub_parser.set_defaults(obj_class = AgentVmi, op = 'list')
-
-        self.parser = parser
 
     def main(self):
         args = self.parser.parse_args()
