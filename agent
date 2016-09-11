@@ -245,7 +245,7 @@ class AgentServiceInstance(object):
 
         if args.vm:
             pt_list = self.get_pt_list_from_vm(vm, network)
-        else
+        else:
             pt_list = self.get_pt_list_from_args(args)
         if not pt_list:
             return
@@ -526,13 +526,10 @@ class AgentCni(object):
         api.add_port(vm.uuid, vmi.uuid, ns_name, mac, port_type = 'NovaVMPort')
 
         # dhclient
-        lease_path = '/var/lib/dhclient/%s' %(args.id)
-        pid_path = '/var/run/%s' %(args.id)
-        shell_cmd('mkdir -p %s' %(lease_path))
-        shell_cmd('mkdir -p %s' %(pid_path))
-        shell_cmd('ip netns exec %s dhclient -lf %s/dhclient.%s.leases ' \
-            '-pf %s/dhclient.%s.pid %s' \
-            %(args.id, lease_path, args.veth, pid_path, args.veth, args.veth))
+        lease_file = '/var/run/dhclient-%s-%s.leases' %(args.id, args.veth)
+        pid_file = '/var/run/dhclient-%s-%s.pid' %(args.id, args.veth)
+        shell_cmd('ip netns exec %s dhclient -lf %s -pf %s %s' \
+            %(args.id, lease_file, pid_file, args.veth))
 
     def delete(self, args):
         container_name = '%s-%s' % (socket.gethostname(), args.id)
@@ -543,8 +540,6 @@ class AgentCni(object):
             return
 
         # dhclient
-        lease_path = '/var/lib/dhclient/%s' %(args.id)
-        pid_path = '/var/run/%s' %(args.id)
         output = shell_cmd('ip netns exec %s ip link' %(args.id))
         for line in output.split('\n'):
             l = line.split(' ')
@@ -553,12 +548,12 @@ class AgentCni(object):
             if_name = l[1].rstrip(':')
             if (if_name == 'lo'):
                 continue
-            shell_cmd('ip netns exec %s dhclient -x ' \
-                    '-lf %s/dhclient.%s.leases ' \
-                    '-pf %s/dhclient.%s.pid %s' \
-                    %(args.id, lease_path, if_name, pid_path, if_name, if_name))
-        shell_cmd('rm -fr %s' %(lease_path))
-        shell_cmd('rm -fr %s' %(pid_path))
+            lease_file = '/var/run/dhclient-%s-%s.leases' %(args.id, if_name)
+            pid_file = '/var/run/dhclient-%s-%s.pid' %(args.id, if_name)
+            shell_cmd('ip netns exec %s dhclient -r -lf %s -pf %s %s' \
+                    %(args.id, lease_file, pid_file, if_name))
+            shell_cmd('rm -f %s' %(lease_file))
+            shell_cmd('rm -f %s' %(pid_file))
 
         # VMI
         from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
