@@ -9,12 +9,12 @@ from vnc_api import vnc_api
 
 
 agent_default = {
-    'api-server': '10.87.64.166',
+    'api-server': '10.87.64.167',
     'tenant': 'demo',
     'auth-username': 'admin',
     'auth-password': 'contrail123',
     'auth-tenant': 'admin',
-    'auth-server': '10.87.64.166'}
+    'auth-server': '10.87.64.167'}
 
 
 def shell_cmd(cmd):
@@ -187,19 +187,6 @@ class AgentServiceInstance(object):
             pt_list.append(pt)
         return pt_list
 
-    def create_vip(self, network, tuple_list, si):
-        for type in network.keys():
-            agent_iip = AgentInstanceIp(self.vnc)
-            iip = agent_iip._allocate(
-                    si.uuid + '-' + type + '-v4',
-                    network[type])
-            port_list = []
-            for tuple in tuple_list:
-                port_list.append(tuple[type].uuid)
-            agent_iip._attach(iip, port_list)
-            tag = vnc_api.ServiceInterfaceTag(type = type)
-            si.add_instance_ip(iip, tag)
-
     def create_port_tuple(self, tuple_list, si):
         idx = 0
         for tuple in tuple_list:
@@ -209,10 +196,16 @@ class AgentServiceInstance(object):
             self.vnc.port_tuple_create(pt)
             pt = self.vnc.port_tuple_read(id = pt.uuid)
 
-            # Update VMIs to refer to the port tuple.
+            # Update VMIs to refer to the port tuple and interface type.
             for type in tuple.keys():
-                tuple[type].add_port_tuple(pt)
-                self.vnc.virtual_machine_interface_update(tuple[type])
+                vmi = tuple[type]
+                vmi.add_port_tuple(pt)
+                p = vmi.get_virtual_machine_interface_properties()
+                if not p:
+                    p = vnc_api.VirtualMachineInterfacePropertiesType()
+                p.set_service_interface_type(type)
+                vmi.set_virtual_machine_interface_properties(p)
+                self.vnc.virtual_machine_interface_update(vmi)
 
     def create(self, args):
         '''
@@ -250,9 +243,6 @@ class AgentServiceInstance(object):
             pt_list = self.get_pt_list_from_args(args)
         if not pt_list:
             return
-
-        # Create a VIP on each network.
-        self.create_vip(network, pt_list, si)
 
         si.set_service_instance_properties(properties)
         try:
@@ -293,10 +283,6 @@ class AgentServiceInstance(object):
         # Delete service instance.
         self.vnc.service_instance_delete(id = si.uuid)
 
-        # Delete instance IPs.
-        for id in iip_list:
-            self.vnc.instance_ip_delete(id = id)
-
 
 class AgentInstanceIp(object):
     def __init__(self, vnc):
@@ -312,9 +298,10 @@ class AgentInstanceIp(object):
             name_str = to_fq_name_str(
                     iip.get_virtual_network_refs()[0]['to'])
             print '    Network: %s' %(name_str)
-            name_str = to_fq_name_str(
-                    iip.get_virtual_machine_interface_refs()[0]['to'])
-            print '    VMI:     %s' %(name_str)
+            interface_refs = iip.get_virtual_machine_interface_refs()
+            if interface_refs:
+                name_str = to_fq_name_str(interface_refs[0]['to'])
+                print '    VMI:     %s' %(name_str)
             print ''
 
     def show(self, args):
@@ -346,7 +333,7 @@ class AgentInstanceIp(object):
                     iip.subnet_uuid = item.subnet_uuid
                     break
         self.vnc.instance_ip_create(iip)
-        return self.vnc.instance_ip_read(id = iip.uuid)
+        return iip
 
     def allocate(self, args):
         network = 'default-domain:' + args.tenant + ':' + args.network
@@ -486,28 +473,13 @@ class AgentCni(object):
     def __init__(self, vnc):
         self.vnc = vnc
 
-    def create(self, args):
-        container_name = '%s-%s' % (socket.gethostname(), args.id)
-        pid = shell_cmd('docker inspect -f \'{{.State.Pid}}\' %s' \
-                %(args.id))
-        pid = pid.rstrip('\n')
-        shell_cmd('mkdir -p /var/run/netns')
-        shell_cmd('sudo ln -sf /proc/%s/ns/net /var/run/netns/%s' \
-                %(pid, args.id))
-        # Virtual machine
-        try:
-            vm = self.vnc.virtual_machine_read(fq_name = [container_name])
-        except vnc_api.NoIdError:
-            vm = vnc_api.VirtualMachine(container_name)
-            self.vnc.virtual_machine_create(vm)
-            vm = self.vnc.virtual_machine_read(id = vm.uuid)
-
+    def add_cni(self, tenant, id, vm, network, veth):
         # VMI
         agent_vmi = AgentPort(self.vnc)
         vmi_args = AgentArgs()
         vmi_args.name = 'id'
-        vmi_args.tenant = args.tenant
-        vmi_args.network = args.network
+        vmi_args.tenant = tenant
+        vmi_args.network = network
         vmi_args.vm = vm.uuid
         vmi = agent_vmi.create(vmi_args)
 
@@ -516,9 +488,9 @@ class AgentCni(object):
         l = mac.split(':')
         ns_name = 'cni' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
         shell_cmd('sudo ip link add %s type veth peer name %s' \
-                %(ns_name, args.veth))
-        shell_cmd('sudo ip link set %s address %s' %(args.veth, mac))
-        shell_cmd('sudo ip link set %s netns %s' %(args.veth, args.id))
+                %(ns_name, veth))
+        shell_cmd('sudo ip link set %s address %s' %(veth, mac))
+        shell_cmd('sudo ip link set %s netns %s' %(veth, id))
         shell_cmd('sudo ip link set %s up' %(ns_name))
 
         # Plug VMI
@@ -527,17 +499,45 @@ class AgentCni(object):
         api.add_port(vm.uuid, vmi.uuid, ns_name, mac, port_type = 'NovaVMPort')
 
         # dhclient
-        lease_file = '/var/run/dhclient-%s-%s.leases' %(args.id, args.veth)
-        pid_file = '/var/run/dhclient-%s-%s.pid' %(args.id, args.veth)
+        lease_file = '/var/run/dhclient-%s-%s.leases' %(id, veth)
+        pid_file = '/var/run/dhclient-%s-%s.pid' %(id, veth)
         shell_cmd('ip netns exec %s dhclient -lf %s -pf %s %s' \
-            %(args.id, lease_file, pid_file, args.veth))
+            %(id, lease_file, pid_file, veth))
+
+    def create(self, args):
+        pid = shell_cmd('docker inspect -f "{{.State.Pid}}" %s' \
+                %(args.id))
+        pid = pid.rstrip('\n')
+        shell_cmd('mkdir -p /var/run/netns')
+        shell_cmd('sudo ln -sf /proc/%s/ns/net /var/run/netns/%s' \
+                %(pid, args.id))
+
+        # Virtual machine
+        vm_name = '%s-%s' % (socket.gethostname(), args.id)
+        try:
+            vm = self.vnc.virtual_machine_read(fq_name = [vm_name])
+        except vnc_api.NoIdError:
+            vm = vnc_api.VirtualMachine(name = vm_name)
+            self.vnc.virtual_machine_create(vm)
+
+        for interface_line in args.interface:
+            for interface_args in interface_line.split(','):
+                arg_name, arg_val = interface_args.split('=')
+                if (arg_name == 'network'):
+                    network = arg_val
+                elif (arg_name == 'veth'):
+                    veth = arg_val
+                else:
+                    print 'ERROR: Unknown argument %s!' %(arg_name)
+                    return
+            self.add_cni(args.tenant, args.id, vm, network, veth)
 
     def delete(self, args):
-        container_name = '%s-%s' % (socket.gethostname(), args.id)
+        vm_name = '%s-%s' % (socket.gethostname(), args.id)
         try:
-            vm = self.vnc.virtual_machine_read(fq_name = [container_name])
+            vm = self.vnc.virtual_machine_read(fq_name = [vm_name])
         except vnc_api.NoIdError:
-            print 'ERROR: VM %s does not exist!' %(container_name)
+            print 'ERROR: VM %s does not exist!' %(vm_name)
             return
 
         # dhclient
@@ -799,6 +799,21 @@ class AgentPort(object):
             print 'ERROR: %s' %(str(e))
 
 
+class AgentPortTuple(object):
+    def __init__(self, vnc):
+        self.vnc = vnc
+
+    def list(self, args):
+        for item in self.vnc.port_tuples_list()['port-tuples']:
+            print item['fq_name']
+
+    def show(self, args):
+        func = self.vnc.port_tuple_read
+        fq_name = ['default-domain', args.tenant, args.service_instance,
+                args.name]
+        show_obj(func, fq_name, args, self.vnc)
+
+
 class AgentNetwork(object):
     def __init__(self, vnc):
         self.vnc = vnc
@@ -1003,11 +1018,10 @@ class Agent(object):
         sub_parser.set_defaults(obj_class = AgentCni, op = 'create')
         sub_parser.add_argument('--id', required = True,
                 metavar = '<ID>', help='Container ID')
-        sub_parser.add_argument('--network', required = True,
-                metavar = '<name>', help='Virtual network name')
-        sub_parser.add_argument('--veth', required = True,
-                metavar = '<name>',
-                help='VETH interface name in the container')
+        sub_parser.add_argument('--interface', action = 'append',
+                metavar = '<arguments>',
+                help = 'Interface ' \
+                       'network=<network>,veth=<interface in container>')
 
         sub_parser = subparsers.add_parser('cni-delete',
                 help = 'Delete container network interface.')
@@ -1099,6 +1113,21 @@ class Agent(object):
                 help='Port name')
 
         self.parser = parser
+
+        #### port tuple
+        sub_parser = subparsers.add_parser('port-tuple-list',
+                help = 'List port tuple.')
+        sub_parser.set_defaults(obj_class = AgentPortTuple, op = 'list')
+
+        sub_parser = subparsers.add_parser('port-tuple-show',
+                help = 'Show port tuple.')
+        sub_parser.set_defaults(obj_class = AgentPortTuple, op = 'show')
+        sub_parser.add_argument('name', help='Port tuple name')
+        sub_parser.add_argument('--service-instance', required = True,
+                help='Service instance name')
+        sub_parser.add_argument('--format',
+                choices = ['json', 'dict', 'dump'], metavar = '<format>',
+                help = 'Output format [ json | dict | dump ]')
 
         #### service template
         sub_parser = subparsers.add_parser('service-template-list',
