@@ -154,9 +154,10 @@ class AgentServiceInstance(object):
         for vm_id in vm_list:
             vm = self.vnc.virtual_machine_read(id = vm_id)
             vmi_vn_list = []
-            for vmi_id in vm.get_virtual_machine_interface_back_refs():
+            for vmi_bref in vm.get_virtual_machine_interface_back_refs():
                 vmi_vn = {}
-                vmi = self.vnc.virtual_machine_interface_read(id = vmi_id)
+                vmi = self.vnc.virtual_machine_interface_read(
+                        id = vmi_bref['uuid'])
                 vmi_vn['obj'] = vmi
                 vn_fqn = vmi.get_virtual_network_refs()[0]['to']
                 vmi_vn['network'] = to_fq_name_str(vn_fqn)
@@ -244,7 +245,7 @@ class AgentServiceInstance(object):
             properties.add_interface_list(interface)
 
         if args.vm:
-            pt_list = self.get_pt_list_from_vm(vm, network)
+            pt_list = self.get_pt_list_from_vm(args.vm, network)
         else:
             pt_list = self.get_pt_list_from_args(args)
         if not pt_list:
@@ -672,6 +673,7 @@ class AgentVm(object):
 
     def list(self, args):
         for vm in self.vnc.virtual_machines_list()['virtual-machines']:
+            print vm['uuid']
             print vm['fq_name']
 
     def show(self, args):
