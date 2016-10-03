@@ -1,0 +1,119 @@
+#!/usr/bin/python
+
+from vnc_api import vnc_api
+
+
+src_default = {
+    'api-server': '10.87.64.166',
+    'auth-username': 'admin',
+    'auth-password': 'contrail123',
+    'auth-tenant': 'admin',
+    'auth-server': '10.87.64.166'}
+
+dst_default = {
+    'api-server': '10.87.64.167',
+    'auth-username': 'admin',
+    'auth-password': 'contrail123',
+    'auth-tenant': 'admin',
+    'auth-server': '10.87.64.167'}
+
+
+class ConfigCopy(object):
+
+    def __init__(self):
+        pass
+
+    def connect(self):
+        self.src_vnc = vnc_api.VncApi(
+                username = src_default['auth-username'],
+                password = src_default['auth-password'],
+                tenant_name = src_default['auth-tenant'],
+                api_server_host = src_default['api-server'],
+                auth_host = src_default['auth-server'])
+        self.dst_vnc = vnc_api.VncApi(
+                username = dst_default['auth-username'],
+                password = dst_default['auth-password'],
+                tenant_name = dst_default['auth-tenant'],
+                api_server_host = dst_default['api-server'],
+                auth_host = dst_default['auth-server'])
+
+    def obj_create(self, func, obj):
+        try:
+            func(obj)
+        except:
+            print 'Skipped.\n'
+        else:
+            print 'Copied.\n'
+
+    def copy_tenant(self):
+        print '\n# Copy tenant.'
+        for ref in self.src_vnc.projects_list()['projects']:
+            if (ref['fq_name'][1] == 'default-project') or \
+                    (ref['fq_name'][1] == 'service'):
+                continue
+            print 'Read %s' %ref['fq_name']
+            src_obj = self.src_vnc.project_read(id = ref['uuid'])
+            dst_obj = vnc_api.Project(name = src_obj.name)
+            print 'Write...'
+            self.obj_create(self.dst_vnc.project_create, dst_obj)
+
+    def copy_ipam(self):
+        print '\n# Copy network IPAM.'
+        for ref in self.src_vnc.network_ipams_list()['network-ipams']:
+            if (ref['fq_name'][1] == 'default-project'):
+                continue
+            print 'Read %s' %ref['fq_name']
+            src_obj = self.src_vnc.network_ipam_read(id = ref['uuid'])
+            dst_obj = vnc_api.NetworkIpam(name = src_obj.name,
+                    parent_type = src_obj.parent_type,
+                    fq_name = src_obj.fq_name)
+            print 'Write...'
+            self.obj_create(self.dst_vnc.network_ipam_create, dst_obj)
+
+    def copy_policy(self):
+        print '\n# Copy network policy.'
+        for ref in self.src_vnc.network_policys_list()['network-policys']:
+            if (ref['fq_name'][1] == 'default-project'):
+                continue
+            print 'Read %s' %ref['fq_name']
+            src_obj = self.src_vnc.network_policy_read(id = ref['uuid'])
+            dst_obj = vnc_api.NetworkPolicy(name = src_obj.name,
+                    parent_type = src_obj.parent_type,
+                    fq_name = src_obj.fq_name)
+            dst_obj.network_policy_entries = src_obj.network_policy_entries
+            print 'Write...'
+            self.obj_create(self.dst_vnc.network_policy_create, dst_obj)
+
+    def copy_network(self):
+        print '\n# Copy virtual network.'
+        for ref in self.src_vnc.virtual_networks_list()['virtual-networks']:
+            if (ref['fq_name'][1] == 'default-project'):
+                continue
+            print 'Read %s' %ref['fq_name']
+            src_obj = self.src_vnc.virtual_network_read(id = ref['uuid'])
+            dst_obj = vnc_api.VirtualNetwork(name = src_obj.name,
+                    parent_type = src_obj.parent_type,
+                    fq_name = src_obj.fq_name)
+            for ipam_ref in src_obj.network_ipam_refs:
+                dst_ipam = self.dst_vnc.network_ipam_read(
+                        fq_name = ipam_ref['to'])
+                dst_obj.add_network_ipam(dst_ipam, ipam_ref['attr'])
+            for policy_ref in src_obj.network_policy_refs:
+                dst_policy = self.dst_vnc.network_policy_read(
+                        fq_name = policy_ref['to'])
+                dst_obj.add_network_policy(dst_policy, policy_ref['attr'])
+            dst_obj.route_target_list = src_obj.route_target_list
+            print 'Write...'
+            self.obj_create(self.dst_vnc.virtual_network_create, dst_obj)
+
+    def main(self):
+        self.connect()
+        self.copy_tenant()
+        self.copy_ipam()
+        self.copy_policy()
+        self.copy_network()
+
+
+if __name__ == '__main__':                                    
+    ConfigCopy().main()
+
