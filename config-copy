@@ -54,7 +54,6 @@ class ConfigCopy(object):
             print 'Read %s' %ref['fq_name']
             src_obj = self.src_vnc.project_read(id = ref['uuid'])
             dst_obj = vnc_api.Project(name = src_obj.name)
-            print 'Write...'
             self.obj_create(self.dst_vnc.project_create, dst_obj)
 
     def copy_ipam(self):
@@ -67,7 +66,6 @@ class ConfigCopy(object):
             dst_obj = vnc_api.NetworkIpam(name = src_obj.name,
                     parent_type = src_obj.parent_type,
                     fq_name = src_obj.fq_name)
-            print 'Write...'
             self.obj_create(self.dst_vnc.network_ipam_create, dst_obj)
 
     def copy_policy(self):
@@ -81,7 +79,6 @@ class ConfigCopy(object):
                     parent_type = src_obj.parent_type,
                     fq_name = src_obj.fq_name)
             dst_obj.network_policy_entries = src_obj.network_policy_entries
-            print 'Write...'
             self.obj_create(self.dst_vnc.network_policy_create, dst_obj)
 
     def copy_network(self):
@@ -94,16 +91,19 @@ class ConfigCopy(object):
             dst_obj = vnc_api.VirtualNetwork(name = src_obj.name,
                     parent_type = src_obj.parent_type,
                     fq_name = src_obj.fq_name)
-            for ipam_ref in src_obj.network_ipam_refs:
-                dst_ipam = self.dst_vnc.network_ipam_read(
-                        fq_name = ipam_ref['to'])
-                dst_obj.add_network_ipam(dst_ipam, ipam_ref['attr'])
-            for policy_ref in src_obj.network_policy_refs:
-                dst_policy = self.dst_vnc.network_policy_read(
-                        fq_name = policy_ref['to'])
-                dst_obj.add_network_policy(dst_policy, policy_ref['attr'])
-            dst_obj.route_target_list = src_obj.route_target_list
-            print 'Write...'
+            refs = src_obj.get_network_ipam_refs()
+            if refs:
+                for ipam_ref in refs:
+                    dst_ipam = self.dst_vnc.network_ipam_read(
+                            fq_name = ipam_ref['to'])
+                    dst_obj.add_network_ipam(dst_ipam, ipam_ref['attr'])
+            refs = src_obj.get_network_policy_refs()
+            if refs:
+                for policy_ref in refs:
+                    dst_policy = self.dst_vnc.network_policy_read(
+                            fq_name = policy_ref['to'])
+                    dst_obj.add_network_policy(dst_policy, policy_ref['attr'])
+            dst_obj.route_target_list = src_obj.get_route_target_list()
             self.obj_create(self.dst_vnc.virtual_network_create, dst_obj)
 
     def main(self):
