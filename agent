@@ -70,7 +70,9 @@ class AgentTenant(object):
 
     def list(self, args):
         for item in self.vnc.projects_list()['projects']:
+            print item['uuid']
             print item['fq_name']
+            print
 
     def create(self, args):
         domain = self.vnc.domain_read(fq_name = ['default-domain'])
@@ -486,17 +488,18 @@ class AgentCni(object):
         # CNI
         mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
         l = mac.split(':')
-        ns_name = 'cni' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
-        shell_cmd('sudo ip link add %s type veth peer name %s' \
-                %(ns_name, veth))
+        cni_name = 'cni' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
+        shell_cmd('sudo ip link add %s type veth peer name %s_tmp' \
+                %(cni_name, cni_name))
         shell_cmd('sudo ip link set %s address %s' %(veth, mac))
-        shell_cmd('sudo ip link set %s netns %s' %(veth, id))
-        shell_cmd('sudo ip link set %s up' %(ns_name))
+        shell_cmd('sudo ip link set %s_tmp netns %s name %s' \
+                %(cni_name, id, veth))
+        shell_cmd('sudo ip link set %s up' %(cni_name))
 
         # Plug VMI
         from contrail_vrouter_api.vrouter_api import ContrailVRouterApi
         api = ContrailVRouterApi()
-        api.add_port(vm.uuid, vmi.uuid, ns_name, mac, port_type = 'NovaVMPort')
+        api.add_port(vm.uuid, vmi.uuid, cni_name, mac, port_type = 'NovaVMPort')
 
         # dhclient
         lease_file = '/var/run/dhclient-%s-%s.leases' %(id, veth)
@@ -568,8 +571,8 @@ class AgentCni(object):
             # CNI
             mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
             l = mac.split(':')
-            ns_name = 'cni' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
-            shell_cmd('ip link delete %s' %(ns_name))
+            cni_name = 'cni' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
+            shell_cmd('ip link delete %s' %(cni_name))
 
             # Delete IP address
             ip_list = vmi.get_instance_ip_back_refs()
@@ -846,11 +849,16 @@ class AgentNetwork(object):
     def subnet_add(self, args):
         vn = self.vnc.virtual_network_read(
                 fq_name = ['default-domain', args.tenant, args.name])
-        ipam = self.vnc.network_ipam_read(
-                fq_name = ['default-domain', args.tenant, args.ipam])
+        if args.ipam:
+            ipam = self.vnc.network_ipam_read(
+                    fq_name = ['default-domain', args.tenant, args.ipam])
+        else:
+            ipam = self.vnc.network_ipam_read(
+                    fq_name = ['default-domain', 'default-project', \
+                    'default-network-ipam'])
         ipam_subnet = vnc_api.IpamSubnetType()
         prefix, prefix_len = args.cidr.split('/')
-        subnet = vnc_api.SubnetType(prefix, prefix_len)
+        subnet = vnc_api.SubnetType(prefix, int(prefix_len))
         ipam_subnet.set_subnet(subnet)
         if args.gateway:
             ipam_subnet.set_default_gateway(args.gateway)
@@ -1072,8 +1080,7 @@ class Agent(object):
         sub_parser.add_argument('name', help='Network name')
         sub_parser.add_argument('--cidr', required = True,
                 metavar = '<prefix>/<length>', help='Subnet CIDR')
-        sub_parser.add_argument('--ipam', required = True,
-                help='IPAM name')
+        sub_parser.add_argument('--ipam', help='IPAM name')
         sub_parser.add_argument('--gateway', metavar = 'address',
                 help='Gateway address')
         sub_parser.add_argument('--service', metavar = 'address',
