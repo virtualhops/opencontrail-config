@@ -489,11 +489,12 @@ class AgentCni(object):
         mac = vmi.virtual_machine_interface_mac_addresses.mac_address[0]
         l = mac.split(':')
         cni_name = 'cni' + l[1] + l[2] + l[3] + l[4] + '-' + l[5]
-        shell_cmd('sudo ip link add %s type veth peer name %s_tmp' \
-                %(cni_name, cni_name))
-        shell_cmd('sudo ip link set %s address %s' %(veth, mac))
-        shell_cmd('sudo ip link set %s_tmp netns %s name %s' \
-                %(cni_name, id, veth))
+        tmp_name = l[1] + l[2] + l[3] + l[4] + l[5]
+        shell_cmd('sudo ip link add %s type veth peer name %s' \
+                %(cni_name, tmp_name))
+        shell_cmd('sudo ip link set %s address %s' %(tmp_name, mac))
+        shell_cmd('sudo ip link set %s netns %s name %s' \
+                %(tmp_name, id, veth))
         shell_cmd('sudo ip link set %s up' %(cni_name))
 
         # Plug VMI
