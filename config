@@ -1,21 +1,285 @@
 #!/usr/bin/python
 
 import sys
-from opencontrail_config.config_shell import *
+import argparse
+from config_obj import *
 
-default_client_args = [
+default_args = [
     ('--auth-username', 'admin'),
     ('--auth-password', 'contrail123'),
     ('--auth-tenant', 'admin'),
     ('--auth-region', 'RegionOne'),
-    ('--auth-server', '127.0.0.1'),
-    ('--api-server', '127.0.0.1'),
+    ('--auth-server', '10.87.68.168'),
+    ('--api-server', '10.87.68.168'),
     ('--tenant', 'demo')]
 
+
+class ConfigCli():
+
+    def __init__(self):
+        pass
+
+    def env(self, *args, **kwargs):
+        for arg in args:
+            value = os.environ.get(arg, None)
+            if value:
+                return value
+        return kwargs.get('default', '')
+
+    def add_show_args(self, sp, default_name = None):
+        sp.add_argument('name', default = default_name,
+                metavar = '<name>', help = 'The name')
+        sp.add_argument('--format',
+                choices = ['default', 'json', 'dump', 'dict'],
+                default = 'default', metavar = '<format>',
+                help = 'The object format ' \
+                       '[ default | json | dump | dict ]')
+
+    def parser_init(self):
+        parser = argparse.ArgumentParser()
+        self.parser = parser
+        parser.add_argument('--auth-username', help = 'User name')
+        parser.add_argument('--auth-password', help = 'Password')
+        parser.add_argument('--auth-tenant', help = 'Tenant name')
+        parser.add_argument('--auth-region', help = 'Region name')
+        parser.add_argument('--auth-server', help = 'Auth server address')
+        parser.add_argument('--api-server', help = 'API server address')
+        parser.add_argument('--tenant', help = 'Tenant name')
+
+        op_parsers = parser.add_subparsers(metavar = '<operation>')
+        opp_list = op_parsers.add_parser('list')
+        opp_show = op_parsers.add_parser('show')
+        opp_create = op_parsers.add_parser('create')
+        opp_delete = op_parsers.add_parser('delete')
+
+        ps_list = opp_list.add_subparsers(metavar = '<object>')
+        ps_show = opp_show.add_subparsers(metavar = '<object>')
+        ps_create = opp_create.add_subparsers(metavar = '<object>')
+        ps_delete = opp_delete.add_subparsers(metavar = '<object>')
+
+        #### Container Network Interface
+        p = ps_create.add_parser('cni', help = 'Container Network Interface')
+        p.set_defaults(obj_class = ConfigCni, obj_func = 'create')
+        p.add_argument('--id', required = True,
+                metavar = '<ID>', help='Container ID')
+        p.add_argument('--interface', action = 'append',
+                metavar = '<arguments>',
+                help = 'Interface ' \
+                       'network=<network>,veth=<interface in container>')
+
+        p = ps_delete.add_parser('cni', help = 'Container Network Interface')
+        p.set_defaults(obj_class = ConfigCni, obj_func = 'delete')
+        p.add_argument('--id', required = True, metavar = '<ID>',
+                help='Container ID')
+
+        #### Instance IP ####
+        p = ps_list.add_parser('iip', help = 'Instance IP')
+        p.set_defaults(obj_class = ConfigInstanceIp, obj_func = 'list')
+
+
+        p = ps_show.add_parser('iip', help = 'Instance IP')
+        p.set_defaults(obj_class = ConfigInstanceIp, obj_func = 'show')
+        self.add_show_args(p)
+
+        p = ps_create.add_parser('iip', help = 'Instance IP')
+        p.set_defaults(obj_class = ConfigInstanceIp, obj_func = 'create')
+        p.add_argument('--network', metavar = '<name>', required = True,
+                help = 'The name of virtual network')
+        p.add_argument('--address', metavar = '<address>',
+                help = 'IPv4 or IPv6 address')
+        p.add_argument('--family', choices = ['v4', 'v6'],
+                default = 'v4', metavar = '<family>',
+                help = 'The address family [ v4 | v6 ]')
+        p.add_argument('--aa', action = 'store_true',
+                help = 'Enable active/active mode')
+        p.add_argument('--port', action = 'append',
+                metavar = '<UUID>', help = 'Port/VMI UUID')
+
+        p = ps_delete.add_parser('iip', help = 'Instance IP')
+        p.set_defaults(obj_class = ConfigInstanceIp, obj_func = 'delete')
+        p.add_argument('id', metavar = '<UUID>',
+                help = 'The UUID of Instance IP')
+
+        #### Loadbalancer ####
+        p = ps_list.add_parser('lb', help = 'Loadbalancer')
+        p.set_defaults(obj_class = ConfigLoadbalancer, obj_func = 'list')
+
+        p = ps_show.add_parser('lb', help = 'Loadbalancer')
+        p.set_defaults(obj_class = ConfigLoadbalancer, obj_func = 'show')
+        self.add_show_args(p)
+
+        #### Loadbalancer Listener ####
+        p = ps_list.add_parser('lb-listener', help = 'Loadbalancer Listener')
+        p.set_defaults(obj_class = ConfigLoadbalancerListener,
+                obj_func = 'list')
+
+        p = ps_show.add_parser('lb-listener', help = 'Loadbalancer Listener')
+        p.set_defaults(obj_class = ConfigLoadbalancerListener,
+                obj_func = 'show')
+        self.add_show_args(p)
+
+        #### Loadbalancer Pool ####
+        p = ps_list.add_parser('lb-pool', help = 'Loadbalancer Pool')
+        p.set_defaults(obj_class = ConfigLoadbalancerPool, obj_func = 'list')
+
+        p = ps_show.add_parser('lb-pool', help = 'Loadbalancer Pool')
+        p.set_defaults(obj_class = ConfigLoadbalancerPool, obj_func = 'show')
+        self.add_show_args(p)
+
+        #### Loadbalancer Member ####
+        p = ps_list.add_parser('lb-member', help = 'Loadbalancer Member')
+        p.set_defaults(obj_class = ConfigLoadbalancerMember, obj_func = 'list')
+
+        p = ps_show.add_parser('lb-member', help = 'Loadbalancer Member')
+        p.set_defaults(obj_class = ConfigLoadbalancerMember, obj_func = 'show')
+        self.add_show_args(p)
+
+        #### Port ####
+        p = ps_list.add_parser('port', help = 'Port/VMI')
+        p.set_defaults(obj_class = ConfigPort, obj_func = 'list')
+
+        p = ps_show.add_parser('port', help = 'Port/VMI')
+        p.set_defaults(obj_class = ConfigPort, obj_func = 'show')
+        self.add_show_args(p)
+
+        p = ps_create.add_parser('port', help = 'Port/VMI')
+        p.set_defaults(obj_class = ConfigPort, obj_func = 'create')
+        p.add_argument('name', metavar = '<name> | id',
+                help='Port name')
+        p.add_argument('--network', required = True,
+                metavar = '<name>[:<subnet prefix>/<length>[...]]',
+                help='Virtual network name')
+
+        p = ps_delete.add_parser('port', help = 'Port/VMI')
+        p.set_defaults(obj_class = ConfigPort, obj_func = 'delete')
+        p.add_argument('name', metavar = '<name> | <id>', help = 'The name')
+
+        #### Service Appliance ####
+        p = ps_list.add_parser('sa', help = 'Service Appliance')
+        p.set_defaults(obj_class = ConfigServiceAppliance, obj_func = 'list')
+
+        p = ps_show.add_parser('sa', help = 'Service Appliance')
+        p.set_defaults(obj_class = ConfigServiceAppliance, obj_func = 'show')
+        self.add_show_args(p)
+
+        #### Service Appliance Set ####
+        p = ps_list.add_parser('sas', help = 'Service Appliance Set')
+        p.set_defaults(obj_class = ConfigServiceApplianceSet,
+                obj_func = 'list')
+
+        p = ps_show.add_parser('sas', help = 'Service Appliance Set')
+        p.set_defaults(obj_class = ConfigServiceApplianceSet,
+                obj_func = 'show')
+        self.add_show_args(p)
+
+        p = ps_create.add_parser('sas', help = 'Service Appliance Set')
+        p.set_defaults(obj_class = ConfigServiceApplianceSet,
+                obj_func = 'create')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+        p.add_argument('--driver', metavar = '<class>', required = True,
+                help = 'The driver class name with path')
+
+        p = ps_delete.add_parser('sas', help = 'Service Appliance Set')
+        p.set_defaults(obj_class = ConfigServiceApplianceSet,
+                obj_func = 'delete')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+
+        #### Service Instance ####
+        p = ps_list.add_parser('si', help = 'Service Instance')
+        p.set_defaults(obj_class = ConfigServiceInstance, obj_func = 'list')
+
+        p = ps_show.add_parser('si', help = 'Service Instance')
+        p.set_defaults(obj_class = ConfigServiceInstance, obj_func = 'show')
+        self.add_show_args(p)
+
+        p = ps_delete.add_parser('si', help = 'Service Instance')
+        p.set_defaults(obj_class = ConfigServiceInstance, obj_func = 'delete')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+
+        #### Service Template ####
+        p = ps_list.add_parser('st', help = 'Service Template')
+        p.set_defaults(obj_class = ConfigServiceTemplate, obj_func = 'list')
+
+        p = ps_show.add_parser('st', help = 'Service Template')
+        p.set_defaults(obj_class = ConfigServiceTemplate, obj_func = 'show')
+        self.add_show_args(p)
+
+        #### Tenant ####
+        p = ps_list.add_parser('tenant', help = 'Tenant')
+        p.set_defaults(obj_class = ConfigTenant, obj_func = 'list')
+
+        p = ps_show.add_parser('tenant', help = 'Tenant')
+        p.set_defaults(obj_class = ConfigTenant, obj_func = 'show')
+        self.add_show_args(p)
+
+        p = ps_create.add_parser('tenant', help = 'Tenant')
+        p.set_defaults(obj_class = ConfigTenant, obj_func = 'create')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+
+        p = ps_delete.add_parser('tenant', help = 'Tenant')
+        p.set_defaults(obj_class = ConfigTenant, obj_func = 'delete')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+
+        #### Virtual Machine ####
+        p = ps_list.add_parser('vm', help = 'Virtual Machine')
+        p.set_defaults(obj_class = ConfigVm, obj_func = 'list')
+
+        p = ps_show.add_parser('vm', help = 'Virtual Machine')
+        p.set_defaults(obj_class = ConfigVm, obj_func = 'show')
+        self.add_show_args(p)
+
+        p = ps_delete.add_parser('vm', help = 'Virtual Machine')
+        p.set_defaults(obj_class = ConfigVm, obj_func = 'delete')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+
+        #### Virtual Network ####
+        p = ps_list.add_parser('network', help = 'Virtual Network')
+        p.set_defaults(obj_class = ConfigNetwork, obj_func = 'list')
+
+        p = ps_show.add_parser('network', help = 'Virtual Network')
+        p.set_defaults(obj_class = ConfigNetwork, obj_func = 'show')
+        self.add_show_args(p)
+
+        #### Virtual Router ####
+        p = ps_list.add_parser('vrouter', help = 'Virtual Router')
+        p.set_defaults(obj_class = ConfigVirtualRouter, obj_func = 'list')
+
+        p = ps_show.add_parser('vrouter', help = 'Virtual Router')
+        p.set_defaults(obj_class = ConfigVirtualRouter, obj_func = 'show')
+        self.add_show_args(p)
+
+        p = ps_create.add_parser('vrouter', help = 'Virtual Router')
+        p.set_defaults(obj_class = ConfigVirtualRouter, obj_func = 'create')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+        p.add_argument('--address', metavar = '<IP address>', required = True,
+                help = 'IP address')
+
+        p = ps_delete.add_parser('vrouter', help = 'Virtual Router')
+        p.set_defaults(obj_class = ConfigVirtualRouter, obj_func = 'delete')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+
+        p = ps_delete.add_parser('vrouter-vm', help = 'Virtual Router VM ref')
+        p.set_defaults(obj_class = ConfigVirtualRouter, obj_func = 'delete_vm')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+
+    def run(self):
+        self.parser_init()
+        args = self.parser.parse_args()
+        #print args
+        #return
+        client = ConfigClient(args.auth_username, args.auth_password,
+                args.auth_tenant, args.api_server, args.auth_region,
+                args.auth_server, args.tenant)
+        obj = args.obj_class(client = client)
+        func = getattr(obj, args.obj_func)
+        func(args)
+
+
+
 if __name__ == '__main__':
-    for arg in default_client_args:
+    for arg in default_args:
         if not arg[0] in sys.argv:
             sys.argv.insert(1, arg[0])
             sys.argv.insert(2, arg[1])
-    ConfigShell().main()
+    ConfigCli().run()
 
