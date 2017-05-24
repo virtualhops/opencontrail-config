@@ -178,6 +178,8 @@ class ConfigCli():
         p.add_argument('name', metavar = '<name>', help = 'The name')
         p.add_argument('--driver', metavar = '<class>', required = True,
                 help = 'The driver class name with path')
+        p.add_argument('--kv', metavar = '<key>=<value>', required = True,
+                action = 'append', help = 'The key-value pair')
 
         p = ps_delete.add_parser('sas', help = 'Service Appliance Set')
         p.set_defaults(obj_class = ConfigServiceApplianceSet,
