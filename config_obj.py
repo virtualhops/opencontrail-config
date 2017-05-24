@@ -496,6 +496,12 @@ class ConfigServiceApplianceSet(ConfigObject):
     def create(self, args):
         obj = vnc_api.ServiceApplianceSet(name = args.name)
         obj.set_service_appliance_driver(args.driver)
+        kvs = vnc_api.KeyValuePairs()
+        for kv_arg in args.kv:
+            k, v = kv_arg.split('=')
+            kv = vnc_api.KeyValuePair(key = k, value = v)
+            kvs.add_key_value_pair(kv)
+        obj.set_service_appliance_set_properties(kvs)
         try:
             self.vnc.service_appliance_set_create(obj)
         except Exception as e:
