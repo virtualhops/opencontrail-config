@@ -549,10 +549,45 @@ class ConfigTenant(ConfigObject):
         obj = self.obj_get(args.name, msg = True)
         if not obj:
             return
-        try:
-            self.vnc.project_delete(id = obj.uuid)
-        except Exception as e:
-            print 'ERROR: %s' %(str(e))
+        self.del_obj(obj, 'project')
+        #try:
+        #    self.vnc.project_delete(id = obj.uuid)
+        #except Exception as e:
+        #    print 'ERROR: %s' %(str(e))
+
+    def del_obj(self, obj, obj_type):
+        type_int = ['routing_instance']
+        print '%s: %s' %(obj_type, obj.fq_name)
+        for types in obj.children_fields:
+            type = types.rstrip('s')
+            #print '  Child type: %s' %type
+            if type in type_int:
+                continue
+            f_get = getattr(obj, 'get_' + types)
+            l = f_get()
+            if not l:
+                continue
+            f_read = getattr(self.vnc, type + '_read')
+            for ref in l:
+                obj_next = f_read(id = ref['uuid'])
+                self.del_obj(obj_next, type)
+
+        for types in obj.backref_fields:
+            type = types.replace('_back_refs', '')
+            #print '  BackRef type: %s' %type
+            if type in type_int:
+                continue
+            f_get = getattr(obj, 'get_' + types)
+            l = f_get()
+            if not l:
+                continue
+            f_read = getattr(self.vnc, type + '_read')
+            for ref in l:
+                obj_next = f_read(id = ref['uuid'])
+                self.del_obj(obj_next, type)
+        print 'Delete obj %s' %obj.fq_name
+        #f_del = getattr(self.vnc, obj_type + '_delete')
+        #f_del(id = obj.id)
 
 
 class ConfigPolicy(ConfigObject):
