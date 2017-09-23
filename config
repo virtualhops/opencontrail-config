@@ -16,9 +16,9 @@ default_args = [
     ('--auth-password', 'contrail123'),
     ('--auth-tenant', 'admin'),
     ('--auth-region', 'RegionOne'),
-    ('--auth-server', '10.84.29.97'),
-    ('--api-server', '10.84.29.97'),
-    ('--tenant', 'kubernetes')]
+    ('--auth-server', '10.87.68.167'),
+    ('--api-server', '10.87.68.167'),
+    ('--tenant', 'demo')]
 
 
 class ConfigArgs(object):
@@ -92,14 +92,14 @@ class ConfigObject(object):
         obj = self.obj_get(args.name, msg = True)
         if not obj:
             return
-        if (args.format == 'json'):
-            self.show_json(obj)
+        if (args.format == 'obj'):
+            self.show_obj(obj)
         elif (args.format == 'dump'):
             obj.dump()
         elif (args.format == 'dict'):
             self.show_dict(obj)
         else:
-            self.show_obj(obj)      
+            self.show_json(obj)      
 
 
 class ConfigCni(ConfigObject):
@@ -474,6 +474,24 @@ class ConfigVirtualRouter(ConfigObject):
             print 'ERROR: %s' %(str(e))
 
 
+class ConfigAcl(ConfigObject):
+    def __init__(self, client):
+        super(ConfigAcl, self).__init__(client,
+                client.vnc.access_control_list_read,
+                client.vnc.access_control_lists_list)
+
+    def show_obj(self, obj):
+        print '## Access Control List'
+        print 'Name: %s' %(obj.get_fq_name())
+        print 'UUID: %s' %(obj.uuid)
+
+    def create(self, args):
+        pass
+
+    def delete(self, args):
+        pass
+
+
 class ConfigLoadbalancer(ConfigObject):
     def __init__(self, client):
         super(ConfigLoadbalancer, self).__init__(client,
@@ -639,7 +657,6 @@ class ConfigTenant(ConfigObject):
 class ConfigPolicy(ConfigObject):
     def __init__(self, client):
         super(ConfigPolicy, self).__init__(client,
-                ['default-domain', client.tenant.name],
                 client.vnc.network_policy_read,
                 client.vnc.network_policys_list)
 
@@ -762,48 +779,63 @@ class ConfigPolicy(ConfigObject):
         rule.set_action_list(action_list)
         return rule
 
-    def add(self, name, rule_arg_list):
+    def create(self, args):
+        obj = self.obj_get(args.name)
+        if obj:
+            print 'ERROR: Policy %s exists!' %(args.name)
+            return
+
         rule_list = []
-        if not rule_arg_list:
+        if not args.rule:
             rule = self.add_rule([])
             rule_list.append(rule)
         else:
-            for rule_arg in rule_arg_list:
+            for rule_arg in args.rule:
                 rule = self.add_rule(rule_arg.split(','))
                 rule_list.append(rule)
 
-        obj = self.obj_get(name)
-        if obj:
-            rules = obj.get_network_policy_entries()
-            if not rules:
-                rules = vnc_api.PolicyEntriesType(policy_rule = rule_list)
-            else:
-                for item in rule_list:
-                    rules.add_policy_rule(item)
-            obj.set_network_policy_entries(rules)
-            try:
-                self.vnc.network_policy_update(obj)
-            except Exception as e:
-                print 'ERROR: %s' %(str(e))
-        else:
-            rules = vnc_api.PolicyEntriesType(policy_rule = rule_list)
-            obj = vnc_api.NetworkPolicy(name = name,
-                    parent_obj = self.tenant,
-                    network_policy_entries = rules)
-            try:
-                self.vnc.network_policy_create(obj)
-            except Exception as e:
-                print 'ERROR: %s' %(str(e))
+        rules = vnc_api.PolicyEntriesType(policy_rule = rule_list)
+        obj = vnc_api.NetworkPolicy(name = args.name,
+                parent_obj = self.tenant,
+                network_policy_entries = rules)
+        try:
+            self.vnc.network_policy_create(obj)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
 
-    def delete(self, name, rule_arg_list):
-        obj = self.obj_get(name, msg = True)
+    def add(self, args):
+        obj = self.obj_get(args.name)
+        if not obj:
+            print 'ERROR: Policy %s is not found!' %(args.name)
+            return
+
+        rule_list = []
+        for rule_arg in args.rule:
+            rule = self.add_rule(rule_arg.split(','))
+            rule_list.append(rule)
+
+        rules = obj.get_network_policy_entries()
+        if not rules:
+            rules = vnc_api.PolicyEntriesType(policy_rule = rule_list)
+        else:
+            for item in rule_list:
+                rules.add_policy_rule(item)
+        obj.set_network_policy_entries(rules)
+        try:
+            self.vnc.network_policy_update(obj)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
+
+
+    def delete(self, args):
+        obj = self.obj_get(args.name, msg = True)
         if not obj:
             return
-        if rule_arg_list:
+        if args.rule:
             rules = obj.get_network_policy_entries()
             if not rules:
                 return
-            for rule_arg in rule_arg_list:
+            for rule_arg in args.rule:
                 for arg in rule_arg.split(','):
                     arg_name, arg_val = arg.split('=')
                     if (arg_name == 'index'):
@@ -1016,12 +1048,16 @@ class ConfigNetwork(ConfigObject):
         self.show_ref_route_table(obj)
 
     def add_ipam(self, obj, name, subnet, gateway = None):
-        try:
-            ipam_obj = self.vnc.network_ipam_read(
-                    fq_name = self.fq_name_get(name))
-        except Exception as e:
-            print 'ERROR: %s' %(str(e))
-            return
+        if name:
+            try:
+                ipam_obj = self.vnc.network_ipam_read(
+                        fq_name = self.fq_name_get(name))
+            except Exception as e:
+                print 'ERROR: %s' %(str(e))
+                return
+        else:
+            ipam_obj = self.vnc.network_ipam_read(fq_name = ['default-domain',
+                    'default-project', 'default-network-ipam'])
         cidr = subnet.split('/')
         subnet = vnc_api.SubnetType(ip_prefix = cidr[0],
                 ip_prefix_len = int(cidr[1]))
@@ -1106,55 +1142,54 @@ class ConfigNetwork(ConfigObject):
             return
         obj.del_route_table(ref_obj = rt_obj)
 
-    def add(self, name, ipam = None, subnet = None, policy = None,
-            route_target = None, route_table = None, shared = None,
-            external = None, l2 = None):
-        create = False
-        obj = self.obj_get(name)
-        if not obj:
-            obj = vnc_api.VirtualNetwork(name = name, parent_obj = self.tenant)
-            if l2:
-                prop = vnc_api.VirtualNetworkType(forwarding_mode = 'l2')
-                obj.set_virtual_network_properties(prop)
-            if shared:
-                obj.set_is_shared(shared)
-            if external:
-                obj.set_router_external(external)
-            create = True
-        if ipam and subnet:
-            self.add_ipam(obj, ipam, subnet)
-        if policy:
-            self.add_policy(obj, policy)
-        if route_target:
-            self.add_route_target(obj, route_target)
-        if route_table:
-            self.add_route_table(obj, route_table)
-        if create:
-            try:
-                self.vnc.virtual_network_create(obj)
-            except Exception as e:
-                print 'ERROR: %s' %(str(e))
-        else:
-            self.vnc.virtual_network_update(obj)
+    def create(self, args):
+        obj = self.obj_get(args.name)
+        if obj:
+            print 'ERROR: Virtual network %s exists!' %(args.name)
+            return
+        obj = vnc_api.VirtualNetwork(name = args.name, parent_obj = self.tenant)
+        #if args.l2:
+        #    prop = vnc_api.VirtualNetworkType(forwarding_mode = 'l2')
+        #    obj.set_virtual_network_properties(prop)
+        #if args.shared:
+        #    obj.set_is_shared(args.shared)
+        #if args.external:
+        #    obj.set_router_external(args.external)
+        if args.subnet:
+            self.add_ipam(obj, args.ipam, args.subnet)
+        if args.policy:
+            self.add_policy(obj, args.policy)
+        #if args.route_target:
+        #    self.add_route_target(obj, args.route_target)
+        #if args.route_table:
+        #    self.add_route_table(obj, args.route_table)
+        try:
+            self.vnc.virtual_network_create(obj)
+        except Exception as e:
+            print 'ERROR: %s' %(str(e))
 
-    def delete(self, name, ipam = None, policy = None, route_target = None,
-            route_table = None):
+    def add(self, args):
+        obj = self.obj_get(args.name)
+        if not obj:
+            print 'ERROR: Virtual network %s is not found!' %(args.name)
+        if args.policy:
+            self.add_policy(obj, args.policy)
+        self.vnc.virtual_network_update(obj)
+
+    def delete(self, args):
         update = False
-        obj = self.obj_get(name, msg = True)
+        obj = self.obj_get(args.name, msg = True)
         if not obj:
             return
-        if ipam:
-            self.ipam_del(obj, ipam)
+        if args.policy:
+            self.policy_del(obj, args.policy)
             update = True
-        if policy:
-            self.policy_del(obj, policy)
-            update = True
-        if route_target:
-            self.route_target_del(obj, route_target)
-            update = True
-        if route_table:
-            self.route_table_del(obj, route_table)
-            update = True
+        #if args.route_target:
+        #    self.route_target_del(obj, args.route_target)
+        #    update = True
+        #if args.route_table:
+        #    self.route_table_del(obj, args.route_table)
+        #    update = True
         if update:
             self.vnc.virtual_network_update(obj)
         else:
@@ -2450,13 +2485,24 @@ class ConfigCli():
         opp_show = op_parsers.add_parser('show')
         opp_create = op_parsers.add_parser('create')
         opp_delete = op_parsers.add_parser('delete')
+        opp_add = op_parsers.add_parser('add')
 
         ps_list = opp_list.add_subparsers(metavar = '<object>')
         ps_show = opp_show.add_subparsers(metavar = '<object>')
         ps_create = opp_create.add_subparsers(metavar = '<object>')
         ps_delete = opp_delete.add_subparsers(metavar = '<object>')
+        ps_add = opp_add.add_subparsers(metavar = '<object>')
 
-        #### Container Network Interface
+        #### ACL ####
+        p = ps_list.add_parser('acl', help = 'Access Control List')
+        p.set_defaults(obj_class = ConfigAcl, obj_func = 'list')
+
+        p = ps_show.add_parser('acl', help = 'Access Control List')
+        p.set_defaults(obj_class = ConfigAcl, obj_func = 'show')
+        self.add_show_args(p)
+
+
+        #### Container Network Interface ####
         p = ps_create.add_parser('cni', help = 'Container Network Interface')
         p.set_defaults(obj_class = ConfigCni, obj_func = 'create')
         p.add_argument('--id', required = True,
@@ -2595,6 +2641,54 @@ class ConfigCli():
                 obj_func = 'delete')
         p.add_argument('name', metavar = '<name>', help = 'The name')
 
+        #### Policy ####
+        p = ps_list.add_parser('policy', help = 'Network policy')
+        p.set_defaults(obj_class = ConfigPolicy, obj_func = 'list')
+
+        p = ps_show.add_parser('policy', help = 'Network policy')
+        p.set_defaults(obj_class = ConfigPolicy, obj_func = 'show')
+        self.add_show_args(p)
+
+        p = ps_create.add_parser('policy', help = 'Network policy')
+        p.set_defaults(obj_class = ConfigPolicy, obj_func = 'create')
+        p.add_argument('name', metavar = '<name>', help='Policy name')
+        p.add_argument('--rule', action = 'append',
+                metavar = '<arguments>',
+                help = 'Policy rule ' \
+                       'direction=[ "<>" | ">" ],' \
+                       'protocol=[ any | tcp | udp | icmp ],' \
+                       'src-net=[ <name> | any ],' \
+                       'dst-net=[ <name> | any ],' \
+                       'src-port=[ <start>:<end> | any ],' \
+                       'dst-port=[ <start>:<end> | any ],' \
+                       'action=[ pass | deny | drop | reject | alert | ' \
+                               'log | service | mirror ],' \
+                       'service=<name>')
+
+        p = ps_add.add_parser('policy', help = 'Network policy')
+        p.set_defaults(obj_class = ConfigPolicy, obj_func = 'add')
+        p.add_argument('name', metavar = '<name>', help='Policy name')
+        p.add_argument('--rule', action = 'append', required = True,
+                metavar = '<arguments>',
+                help = 'Policy rule ' \
+                       'direction=[ "<>" | ">" ],' \
+                       'protocol=[ any | tcp | udp | icmp ],' \
+                       'src-net=[ <name> | any ],' \
+                       'dst-net=[ <name> | any ],' \
+                       'src-port=[ <start>:<end> | any ],' \
+                       'dst-port=[ <start>:<end> | any ],' \
+                       'action=[ pass | deny | drop | reject | alert | ' \
+                               'log | service | mirror ],' \
+                       'service=<name>')
+
+        p = ps_delete.add_parser('policy', help = 'Network policy')
+        p.set_defaults(obj_class = ConfigPolicy, obj_func = 'delete')
+        p.add_argument('name', metavar = '<name>', help='Policy name')
+        p.add_argument('--rule', action = 'append',
+                metavar = '<arguments>',
+                help = 'Policy rule ' \
+                       'index=<index>')
+
         #### Port ####
         p = ps_list.add_parser('port', help = 'Port/VMI')
         p.set_defaults(obj_class = ConfigPort, obj_func = 'list')
@@ -2702,6 +2796,28 @@ class ConfigCli():
         p = ps_show.add_parser('network', help = 'Virtual Network')
         p.set_defaults(obj_class = ConfigNetwork, obj_func = 'show')
         self.add_show_args(p)
+
+        p = ps_create.add_parser('network', help = 'Virtual Network')
+        p.set_defaults(obj_class = ConfigNetwork, obj_func = 'create')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+        p.add_argument('--ipam', metavar = '<IPAM>',
+                help = 'IPAM')
+        p.add_argument('--subnet', metavar = '<CIDR>',
+                help = 'Subnet')
+        p.add_argument('--policy', metavar = '<policy>',
+                help = 'Policy')
+
+        p = ps_add.add_parser('network', help = 'Virtual Network')
+        p.set_defaults(obj_class = ConfigNetwork, obj_func = 'add')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+        p.add_argument('--policy', metavar = '<policy>',
+                help = 'Policy')
+
+        p = ps_delete.add_parser('network', help = 'Virtual Network')
+        p.set_defaults(obj_class = ConfigNetwork, obj_func = 'delete')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+        p.add_argument('--policy', metavar = '<policy>',
+                help = 'Policy')
 
         #### Virtual Router ####
         p = ps_list.add_parser('vrouter', help = 'Virtual Router')
