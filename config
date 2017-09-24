@@ -748,6 +748,10 @@ class ConfigPolicy(ConfigObject):
                 action = arg_val
             elif (arg_name == 'service'):
                 service_list.append(self.fq_name_get(arg_val, str = True))
+            elif (arg_name == 'analyzer-name'):
+                analyzer_name = arg_val
+            elif (arg_name == 'analyzer-address'):
+                analyzer_address = arg_val
  
         rule = vnc_api.PolicyRuleType()
         if not direction:
@@ -774,6 +778,10 @@ class ConfigPolicy(ConfigObject):
             action_list = vnc_api.ActionListType(simple_action = 'pass')
         elif (action == 'service'):
             action_list = vnc_api.ActionListType(apply_service = service_list)
+        elif (action == 'mirror'):
+            mirror = vnc_api.MirrorActionType(analyzer_name = analyzer_name,
+                    analyzer_ip_address = analyzer_address)
+            action_list = vnc_api.ActionListType(mirror_to = mirror)
         else:
             action_list = vnc_api.ActionListType(simple_action = action)
         rule.set_action_list(action_list)
@@ -1091,7 +1099,7 @@ class ConfigNetwork(ConfigObject):
             return
         obj.del_network_ipam(ref_obj = ipam_obj)
 
-    def add_policy(self, obj, name):
+    def add_policy(self, obj, name, dynamic):
         try:
             policy_obj = self.vnc.network_policy_read(
                     fq_name = self.fq_name_get(name))
@@ -1099,8 +1107,11 @@ class ConfigNetwork(ConfigObject):
             print 'ERROR: %s' %(str(e))
             return
         seq = vnc_api.SequenceType(major = 0, minor = 0)
-        obj.add_network_policy(ref_obj = policy_obj,
-                ref_data = vnc_api.VirtualNetworkPolicyType(sequence = seq))
+        timer = None
+        if dynamic:
+            timer = vnc_api.TimerType()
+        data = vnc_api.VirtualNetworkPolicyType(sequence = seq, timer = timer)
+        obj.add_network_policy(ref_obj = policy_obj, ref_data = data)
 
     def policy_del(self, obj, name):
         try:
@@ -1158,7 +1169,7 @@ class ConfigNetwork(ConfigObject):
         if args.subnet:
             self.add_ipam(obj, args.ipam, args.subnet)
         if args.policy:
-            self.add_policy(obj, args.policy)
+            self.add_policy(obj, args.policy, args.dynamic)
         #if args.route_target:
         #    self.add_route_target(obj, args.route_target)
         #if args.route_table:
@@ -1173,7 +1184,7 @@ class ConfigNetwork(ConfigObject):
         if not obj:
             print 'ERROR: Virtual network %s is not found!' %(args.name)
         if args.policy:
-            self.add_policy(obj, args.policy)
+            self.add_policy(obj, args.policy, args.dynamic)
         self.vnc.virtual_network_update(obj)
 
     def delete(self, args):
@@ -2810,8 +2821,9 @@ class ConfigCli():
         p = ps_add.add_parser('network', help = 'Virtual Network')
         p.set_defaults(obj_class = ConfigNetwork, obj_func = 'add')
         p.add_argument('name', metavar = '<name>', help = 'The name')
-        p.add_argument('--policy', metavar = '<policy>',
-                help = 'Policy')
+        p.add_argument('--policy', metavar = '<policy>', help = 'Policy')
+        p.add_argument('--dynamic', action = 'store_true',
+                help = 'Dynamic policy')
 
         p = ps_delete.add_parser('network', help = 'Virtual Network')
         p.set_defaults(obj_class = ConfigNetwork, obj_func = 'delete')
