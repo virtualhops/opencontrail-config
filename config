@@ -30,6 +30,12 @@ def shell_cmd(cmd):
     output = subprocess.check_output(cmd, shell = True)
     return output
 
+def to_fq_name_str(fq_name_list):
+    fq_name_str = ''
+    for item in fq_name_list:
+        fq_name_str += '%s:' %(item)
+    return fq_name_str.rstrip(':')
+
 
 class ConfigObject(object):
     def __init__(self, client, obj_read_func = None, obj_list_func = None):
@@ -750,6 +756,7 @@ class ConfigPolicy(ConfigObject):
                 service_list.append(self.fq_name_get(arg_val, str = True))
             elif (arg_name == 'analyzer-name'):
                 analyzer_name = arg_val
+                analyzer_address = None
             elif (arg_name == 'analyzer-address'):
                 analyzer_address = arg_val
  
@@ -1312,41 +1319,42 @@ class ConfigServiceTemplate(ConfigObject):
         for item in properties.get_interface_type():
             print '    %s' %(item.get_service_interface_type())
 
-    def add(self, name, mode, type, image, flavor, interface_type,
-            scale = None):
-        obj = vnc_api.ServiceTemplate(name = name)
-        properties = vnc_api.ServiceTemplateType(service_mode = mode,
-                service_type = type, image_name = image, flavor = flavor,
-                ordered_interfaces = True, availability_zone_enable = True)
-        if scale:
-            properties.set_service_scaling(scale)
-            for item in interface_type:
-                if (mode == 'transparent') and \
-                       ((item == 'left') or (item == 'right')):
-                    shared_ip = True
-                elif (mode == 'in-network') and (item == 'left'):
-                    shared_ip = True
+    def create(self, args):
+        '''
+        For v2, the following parameters are ignored.
+          image_name, service_scaling, flavor, service_virtualization_type,
+          availability_zone_enable, vrouter_instance_type, instance_data
+
+        ordered_interfaces has to be true.
+        Type in interface_type has to be
+        [ management | left | right | other[0-9] ].
+        '''
+        obj = self.obj_get(args.name)
+        if obj:
+            print 'ERROR: Service template %s exists!' %(args.name)
+            return
+        obj = vnc_api.ServiceTemplate(name = args.name)
+        properties = vnc_api.ServiceTemplateType(version = 2,
+                service_mode = args.mode, service_type = args.type,
+                ordered_interfaces = True)
+        for interface in args.interface:
+            for arg in interface.split(','):
+                arg_name, arg_val = arg.split('=')
+                if (arg_name == 'type'):
+                    type = vnc_api.ServiceTemplateInterfaceType(
+                            service_interface_type = arg_val)
+                    properties.add_interface_type(type)
                 else:
-                    shared_ip = False
-                type = vnc_api.ServiceTemplateInterfaceType(
-                        service_interface_type = item,
-                        shared_ip = shared_ip,
-                        static_route_enable = True)
-                properties.add_interface_type(type)
-        else:
-            for item in interface_type:
-                type = vnc_api.ServiceTemplateInterfaceType(
-                        service_interface_type = item,
-                        static_route_enable = True)
-                properties.add_interface_type(type)
+                    print 'ERROR: Unknown argument %s!' %arg_name
+                    return
         obj.set_service_template_properties(properties)
         try:
             self.vnc.service_template_create(obj)
         except Exception as e:
             print 'ERROR: %s' %(str(e))
 
-    def delete(self, name):
-        obj = self.obj_get(name, msg = True)
+    def delete(self, args):
+        obj = self.obj_get(args.name, msg = True)
         if not obj:
             return
         try:
@@ -1366,65 +1374,148 @@ class ConfigServiceInstance(ConfigObject):
         print 'Name: %s' %(obj.get_fq_name())
         print 'UUID: %s' %(obj.uuid)
 
-    def add(self, name, template, network_list,
-            auto_policy = None, scale_max = None):
-        obj = vnc_api.ServiceInstance(name = name, parent_obj = self.tenant)
-        properties = vnc_api.ServiceInstanceType(auto_policy = auto_policy)
-        for net in network_list:
-            net_name = None
-            net_route = None
-            net_auto = False
-            tenant_name = self.tenant.name
-            for arg in net.split(','):
-                arg_name, arg_val = arg.split('=')
-                if (arg_name == 'tenant'):
-                    tenant_name = arg_val
-                elif (arg_name == 'network'):
-                    if (arg_val == 'auto'):
-                        net_auto = True
-                    else:
-                        net_name = arg_val
-                elif (arg_name == 'route'):
-                    net_route = arg_val
-            if net_auto:
-                net_fq_name = None
-            else:
-                net_fq_name = 'default-domain:%s:%s' %(tenant_name, net_name)
-            interface = vnc_api.ServiceInstanceInterfaceType(
-                    virtual_network = net_fq_name)
-            if net_route:
-                route = vnc_api.RouteType(prefix = net_route)
-                route_table = vnc_api.RouteTableType()
-                route_table.add_route(route)
-                interface.set_static_routes(route_table)
+    def get_pt_list_from_vm(self, vm_list, network):
+        pt_list = []
+        for vm_id in vm_list:
+            vm = self.vnc.virtual_machine_read(id = vm_id)
+            vmi_vn_list = []
+            for vmi_bref in vm.get_virtual_machine_interface_back_refs():
+                vmi_vn = {}
+                vmi = self.vnc.virtual_machine_interface_read(
+                        id = vmi_bref['uuid'])
+                vmi_vn['obj'] = vmi
+                vn_fqn = vmi.get_virtual_network_refs()[0]['to']
+                vmi_vn['network'] = to_fq_name_str(vn_fqn)
+                vmi_vn_list.append(vmi_vn)
+
+            pt = {}
+            for type in network.keys():
+                for vmi_vn in vmi_vn_list:
+                    if (vmi_vn['network'] == network[type]):
+                        pt[type] = vmi_vn['obj']
+                        break
+                else:
+                    print 'ERROR: VM does not have interface on %s!' \
+                            %(network[type])
+                    return
+            pt_list.append(pt)
+        return pt_list
+
+    def get_pt_list_from_args(self, args):
+        pt_list = []
+        for pt_args in args.port_tuple:
+            pt = {}
+            for arg in pt_args.split(','):
+                port_type, port_id = arg.split('=')
+                vmi = self.vnc.virtual_machine_interface_read(id = port_id)
+                pt[port_type] = vmi
+            pt_list.append(pt)
+        return pt_list
+
+    def create_port_tuple(self, tuple_list, si):
+        idx = 0
+        for tuple in tuple_list:
+            name = si.display_name + '-port-tuple-' + str(idx)
+            idx += 1
+            pt = vnc_api.PortTuple(name = name, parent_obj = si)
+            self.vnc.port_tuple_create(pt)
+            pt = self.vnc.port_tuple_read(id = pt.uuid)
+
+            # Update VMIs to refer to the port tuple and interface type.
+            for type in tuple.keys():
+                vmi = tuple[type]
+                vmi.add_port_tuple(pt)
+                p = vmi.get_virtual_machine_interface_properties()
+                if not p:
+                    p = vnc_api.VirtualMachineInterfacePropertiesType()
+                p.set_service_interface_type(type)
+                vmi.set_virtual_machine_interface_properties(p)
+                self.vnc.virtual_machine_interface_update(vmi)
+
+    def create(self, args):
+        '''
+        For v2, the following parameters are ignored.
+          left_virtual_network, right_virtual_network,
+          management_virtual_network
+        '''
+        obj = self.obj_get(args.name)
+        if obj:
+            print 'ERROR: Service instance %s exists!' %(args.name)
+            return
+        parent = self.vnc.project_read(
+                fq_name = ['default-domain', args.tenant])
+        st = self.vnc.service_template_read(
+                fq_name = ['default-domain', args.template])
+        si_id = str(uuid.uuid4())
+
+        si = vnc_api.ServiceInstance(name = args.name, parent_obj = parent)
+        si.uuid = si_id
+        si.add_service_template(st)
+
+        # Build interface list, the order has to be the same as it in
+        # service template.
+        properties = vnc_api.ServiceInstanceType()
+        network = {}
+        for arg in args.network.split(','):
+            arg_name, arg_val = arg.split('=')
+            network[arg_name] = arg_val
+        st_properties = st.get_service_template_properties()
+        for st_interface in st_properties.get_interface_type():
+            type = st_interface.get_service_interface_type()
+            interface = vnc_api.ServiceInstanceInterfaceType()
+            interface.set_virtual_network(network[type])
             properties.add_interface_list(interface)
 
-        if scale_max:
-            scale = vnc_api.ServiceScaleOutType(
-                    max_instances = int(scale_max),
-                    auto_scale = True)
+        if args.vm:
+            pt_list = self.get_pt_list_from_vm(args.vm, network)
         else:
-            scale = vnc_api.ServiceScaleOutType()
-        properties.set_scale_out(scale)
+            pt_list = self.get_pt_list_from_args(args)
+        if not pt_list:
+            return
 
-        obj.set_service_instance_properties(properties)
+        si.set_service_instance_properties(properties)
         try:
-            template = self.vnc.service_template_read(
-                    fq_name = ['default-domain', template])
+            self.vnc.service_instance_create(si)
+            si = self.vnc.service_instance_read(id = si.uuid)
         except Exception as e:
             print 'ERROR: %s' %(str(e))
-        obj.set_service_template(template)
-        try:
-            self.vnc.service_instance_create(obj)
-        except Exception as e:
-            print 'ERROR: %s' %(str(e))
+            return
+
+        # Create port tuple.
+        self.create_port_tuple(pt_list, si)
+
+    def delete_port_tuple(self, pt_list):
+        if not pt_list:
+            return
+        for pt_child in pt_list:
+            pt = self.vnc.port_tuple_read(id = pt_child['uuid'])
+            for vim_bref in pt.get_virtual_machine_interface_back_refs():
+                vim = self.vnc.virtual_machine_interface_read(
+                        id = vim_bref['uuid'])
+                vim.del_port_tuple(pt)
+                self.vnc.virtual_machine_interface_update(vim)
+            self.vnc.port_tuple_delete(id = pt.uuid)
 
     def delete(self, args):
         obj = self.obj_get(args.name, msg = True)
-        try:
-            self.vnc.service_instance_delete(id = obj.uuid)
-        except Exception as e:
-            print 'ERROR: %s' %(str(e))
+        if not obj:
+            return
+
+        # Update VMI reference and delete port tuples.
+        self.delete_port_tuple(obj.get_port_tuples())
+
+        # Get instance IP list before deleting servic instance.
+        iip_list = []
+        iip_refs = obj.get_instance_ip_refs()
+        if iip_refs:
+            for ref in iip_refs:
+                iip_list.append(ref['uuid'])
+
+        # Delete service instance.
+        self.vnc.service_instance_delete(id = obj.uuid)
+
+        for id in iip_list:
+            self.vnc.instance_ip_delete(id = id)
 
 
 class ConfigRouteTable(ConfigObject):
@@ -2760,6 +2851,26 @@ class ConfigCli():
         p.set_defaults(obj_class = ConfigServiceInstance, obj_func = 'show')
         self.add_show_args(p)
 
+        p = ps_create.add_parser('si', help = 'Service Instance')
+        p.set_defaults(obj_class = ConfigServiceInstance, obj_func = 'create')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
+        p.add_argument('--template', help = 'Service template')
+        p.add_argument('--network', metavar = '<arguments>',
+                help = 'Network ' \
+                       'management=<network FQ name>,' \
+                       'left=<network FQ name>,' \
+                       'right=<network FQ name>,' \
+                       'other[0-9]=<network FQ name>')
+        p.add_argument('--port-tuple', action = 'append',
+                metavar = '<arguments>',
+                help = 'Port tuple ' \
+                       'management=<port UUID>,' \
+                       'left=<port UUID>,' \
+                       'right=<port UUID>,' \
+                       'other[0-9]=<port UUID>')
+        p.add_argument('--vm', action = 'append',
+                metavar = '<UUID>', help = 'VM UUID')
+
         p = ps_delete.add_parser('si', help = 'Service Instance')
         p.set_defaults(obj_class = ConfigServiceInstance, obj_func = 'delete')
         p.add_argument('name', metavar = '<name>', help = 'The name')
@@ -2771,6 +2882,28 @@ class ConfigCli():
         p = ps_show.add_parser('st', help = 'Service Template')
         p.set_defaults(obj_class = ConfigServiceTemplate, obj_func = 'show')
         self.add_show_args(p)
+
+        p = ps_create.add_parser('st', help = 'Service Template')
+        p.set_defaults(obj_class = ConfigServiceTemplate, obj_func = 'create')
+        p.add_argument('name', help='Service template name')
+        p.add_argument('--mode',
+                choices = ['transparent', 'in-network', 'in-network-nat'],
+                metavar = '<mode>',
+                help = 'Service mode ' \
+                       '[ transparent | in-network | in-network-nat ]')
+        p.add_argument('--type',
+                choices = ['firewall', 'analyzer'],
+                metavar = '<type>',
+                help = 'Service type ' \
+                       '[ firewall | analyzer | source-nat | loadbalancer ]')
+        p.add_argument('--interface', action = 'append',
+                metavar = '<arguments>',
+                help = 'Interface ' \
+                       'type=[ left | right | management | other[0-9] ]')
+
+        p = ps_delete.add_parser('st', help = 'Service Template')
+        p.set_defaults(obj_class = ConfigServiceTemplate, obj_func = 'delete')
+        p.add_argument('name', metavar = '<name>', help = 'The name')
 
         #### Tenant ####
         p = ps_list.add_parser('tenant', help = 'Tenant')
