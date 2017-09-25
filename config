@@ -1778,7 +1778,7 @@ class ConfigPort(ConfigObject):
             vm_obj = self.vnc.virtual_machine_read(id = args.vm)
             vmi.add_virtual_machine(vm_obj)
         sg = self.vnc.security_group_read(
-                    fq_name = ['default-domain', args.tenant, 'default'])
+                    fq_name = ['default-domain', self.tenant.name, 'default'])
         vmi.add_security_group(sg)
         self.vnc.virtual_machine_interface_create(vmi)
         vmi = self.vnc.virtual_machine_interface_read(id = vmi.uuid)
